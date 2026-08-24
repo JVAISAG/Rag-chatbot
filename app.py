@@ -19,6 +19,27 @@ with st.sidebar:
     use_reranking = st.toggle("Use Cross-Encoder Re-ranking", value=False)
     
     st.header("Data Management")
+    
+    uploaded_files = st.file_uploader(
+        "Upload Documents", 
+        accept_multiple_files=True, 
+        type=["pdf", "docx", "txt", "md"]
+    )
+    
+    if uploaded_files:
+        if st.button("Save Uploaded Files"):
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            os.makedirs(data_dir, exist_ok=True)
+            saved_count = 0
+            for uploaded_file in uploaded_files:
+                file_path = os.path.join(data_dir, uploaded_file.name)
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                saved_count += 1
+            st.success(f"Successfully saved {saved_count} file(s) to data folder. Click 'Build/Rebuild Index' below.")
+            
+    st.divider()
+    
     if st.button("Build/Rebuild Index"):
         with st.spinner("Building index..."):
             success = pipeline.build_index()
