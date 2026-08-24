@@ -1,0 +1,12 @@
+[
+  {
+    "question": "What is the capital of France?",
+    "expected_answer": "Paris",
+    "expected_source": "geography_notes.txt"
+  },
+  {
+    "question": "When is the machine learning course offered?",
+    "expected_answer": "Fall semester",
+    "expected_source": "course_catalog.pdf"
+  }
+]

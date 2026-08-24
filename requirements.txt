@@ -1,0 +1,11 @@
+sentence-transformers
+chromadb
+pypdf
+python-docx
+streamlit
+numpy
+scikit-learn
+python-dotenv
+rank_bm25
+tiktoken
+ollama
