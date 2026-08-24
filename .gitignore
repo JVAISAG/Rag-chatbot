@@ -34,7 +34,7 @@ ENV/
 
 # Local vector stores
 chroma/
-chromadb/
+chroma_db/
 *.db
 *.sqlite
 *.sqlite3
