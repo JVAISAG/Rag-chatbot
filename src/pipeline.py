@@ -12,6 +12,7 @@ from src.retrieval.hybrid import HybridRetriever
 from src.generation.llm import LLMGenerator
 
 from src.agents.router import QueryRouter
+from src.agents.web_search import WebSearchTool
 
 class RAGPipeline:
     def __init__(self, data_dir: str = "./data", db_path: str = "./chroma_db", llm_model: str = "llama3.2"):
@@ -20,6 +21,7 @@ class RAGPipeline:
         self.embedding_model = get_embedding_model()
         self.llm_generator = LLMGenerator(model_name=llm_model)
         self.router = QueryRouter(model_name=llm_model)
+        self.web_search = WebSearchTool(max_results=5)
         
         # Initialize retrievers
         self.dense_retriever = DenseRetriever(self.store, self.embedding_model)
@@ -81,6 +83,12 @@ class RAGPipeline:
         if intent == "SMALL_TALK":
             answer = self.llm_generator.generate_small_talk_answer(actual_query)
             return answer, []
+            
+        if intent == "WEB_SEARCH":
+            print("Fetching context from the web...")
+            chunks = self.web_search.search(actual_query)
+            answer, sources = self.llm_generator.generate_answer(actual_query, chunks)
+            return answer, sources
             
         # Determine retrieval K based on intent
         top_k = 15 if intent == "SUMMARIZATION" else 5

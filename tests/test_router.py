@@ -24,6 +24,13 @@ def test_query_router_direct_knowledge(mock_generate):
     assert intent == "DIRECT_KNOWLEDGE"
 
 @patch('ollama.generate')
+def test_query_router_web_search(mock_generate):
+    mock_generate.return_value = {"response": "WEB_SEARCH"}
+    router = QueryRouter()
+    intent = router.route_query("Search online for the latest Python version.")
+    assert intent == "WEB_SEARCH"
+
+@patch('ollama.generate')
 def test_query_router_fallback(mock_generate):
     mock_generate.return_value = {"response": "I am not sure."}
     router = QueryRouter()
