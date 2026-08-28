@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 # Add src to path
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from src.pipeline import RAGPipeline
-from src.retrieve import reciprocal_rank_fusion, rerank_results
+from src.retrieval.rrf import reciprocal_rank_fusion
 
 def load_eval_set(path: str) -> List[Dict[str, str]]:
     with open(path, 'r') as f:
@@ -67,12 +67,12 @@ def run_evaluation(eval_set: List[Dict[str, str]], pipeline: RAGPipeline, mode: 
         # Retrieval based on mode
         results = []
         if mode == 'dense':
-            results = pipeline.store.dense_search(query_embedding, top_k=k)
+            results = pipeline.dense_retriever.retrieve(query, top_k=k)
         elif mode == 'bm25':
-            results = pipeline.store.sparse_search(query, top_k=k)
+            results = pipeline.sparse_retriever.retrieve(query, top_k=k)
         elif mode == 'hybrid':
-            dense = pipeline.store.dense_search(query_embedding, top_k=k)
-            sparse = pipeline.store.sparse_search(query, top_k=k)
+            dense = pipeline.dense_retriever.retrieve(query, top_k=k)
+            sparse = pipeline.sparse_retriever.retrieve(query, top_k=k)
             # Naive interleaving without RRF
             seen = set()
             for d, s in zip(dense, sparse):
@@ -89,15 +89,18 @@ def run_evaluation(eval_set: List[Dict[str, str]], pipeline: RAGPipeline, mode: 
                     seen.add(d['id'])
             results = results[:k]
         elif mode == 'hybrid_rrf':
-            dense = pipeline.store.dense_search(query_embedding, top_k=k)
-            sparse = pipeline.store.sparse_search(query, top_k=k)
+            dense = pipeline.dense_retriever.retrieve(query, top_k=k)
+            sparse = pipeline.sparse_retriever.retrieve(query, top_k=k)
             results = reciprocal_rank_fusion(dense, sparse)
             results = results[:k]
         elif mode == 'hybrid_rrf_rerank':
-            dense = pipeline.store.dense_search(query_embedding, top_k=10) # Get more for reranking
-            sparse = pipeline.store.sparse_search(query, top_k=10)
+            dense = pipeline.dense_retriever.retrieve(query, top_k=10)
+            sparse = pipeline.sparse_retriever.retrieve(query, top_k=10)
             fused = reciprocal_rank_fusion(dense, sparse)
-            results = rerank_results(query, fused, top_n=k)
+            if pipeline.hybrid_retriever.reranker:
+                results = pipeline.hybrid_retriever.reranker.rerank(query, fused, top_k=k)
+            else:
+                results = fused[:k]
             
         rank = get_rank_of_expected_source(results, expected_source)
         rankings.append(rank)

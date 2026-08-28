@@ -1,18 +1,37 @@
 from typing import List, Dict, Any, Tuple
 import os
-from src.ingest import load_documents
-from src.chunk import process_documents
-from src.embed import generate_embeddings, get_embedding_model
-from src.store import VectorStore
-from src.retrieve import retrieve, condense_query
-from src.generate import generate_answer
+
+from src.ingestion.document_loader import load_documents
+from src.chunking.text_splitter import process_documents
+from src.embeddings.models import generate_embeddings, get_embedding_model
+from src.storage.vector_store import VectorStore
+from src.retrieval.dense import DenseRetriever
+from src.retrieval.bm25 import BM25Retriever
+from src.retrieval.reranker import CrossEncoderReranker
+from src.retrieval.hybrid import HybridRetriever
+from src.generation.llm import LLMGenerator
 
 class RAGPipeline:
     def __init__(self, data_dir: str = "./data", db_path: str = "./chroma_db", llm_model: str = "llama3.2"):
         self.data_dir = data_dir
         self.store = VectorStore(db_path=db_path)
         self.embedding_model = get_embedding_model()
-        self.llm_model = llm_model
+        self.llm_generator = LLMGenerator(model_name=llm_model)
+        
+        # Initialize retrievers
+        self.dense_retriever = DenseRetriever(self.store, self.embedding_model)
+        self.sparse_retriever = BM25Retriever()
+        
+        # We optionally load reranker if hybrid is requested, but for pipeline initialization we can leave it none 
+        # and instantiate lazily or on demand if the user wants to save memory.
+        self.reranker = CrossEncoderReranker() 
+        
+        # The hybrid retriever orchestrates dense + sparse + reranker
+        self.hybrid_retriever = HybridRetriever(
+            dense_retriever=self.dense_retriever,
+            sparse_retriever=self.sparse_retriever,
+            reranker=self.reranker
+        )
         
     def build_index(self):
         """End-to-end ingestion, chunking, embedding, and indexing."""
@@ -31,6 +50,10 @@ class RAGPipeline:
         
         print("Upserting to vector store...")
         self.store.upsert_chunks(chunks, embeddings)
+        
+        # Fit BM25 in memory (In production, this would be serialized/persisted)
+        self.sparse_retriever.fit(chunks)
+        
         print("Index built successfully.")
         return True
         
@@ -44,20 +67,25 @@ class RAGPipeline:
         # 1. Condense query if history exists
         actual_query = user_query
         if history:
-            actual_query = condense_query(user_query, history, model=self.llm_model)
+            actual_query = self.llm_generator.condense_query(user_query, history)
             print(f"Original Query: {user_query}")
             print(f"Condensed Query: {actual_query}")
             
         # 2. Retrieve chunks
-        chunks = retrieve(
-            query=actual_query,
-            store=self.store,
-            embedding_model=self.embedding_model,
-            use_hybrid=use_hybrid,
-            use_reranking=use_reranking
-        )
-        
+        if use_hybrid:
+            # Temporarily disable reranker if use_reranking is False
+            original_reranker = self.hybrid_retriever.reranker
+            if not use_reranking:
+                self.hybrid_retriever.reranker = None
+                
+            chunks = self.hybrid_retriever.retrieve(query=actual_query, top_k=5, use_rrf=True)
+            
+            # Restore reranker
+            self.hybrid_retriever.reranker = original_reranker
+        else:
+            chunks = self.dense_retriever.retrieve(query=actual_query, top_k=5)
+            
         # 3. Generate Answer
-        answer, sources = generate_answer(actual_query, chunks, model=self.llm_model)
+        answer, sources = self.llm_generator.generate_answer(actual_query, chunks)
         
         return answer, sources

@@ -49,9 +49,7 @@ def chunk_text(text: str, source: str, chunk_size: int = 500, overlap: int = 50)
                     })
                     chunk_index += 1
                     
-                    # Overlap handling (simplistic: taking last N tokens roughly via string split or sentence overlap)
-                    # For a robust overlap, we could keep a rolling buffer of sentences.
-                    # Here we just start fresh with the new sentence.
+                    # Overlap handling (simplistic)
                     current_chunk_text = sentence + " "
                     current_chunk_tokens = sentence_tokens
                 else:
@@ -68,8 +66,7 @@ def chunk_text(text: str, source: str, chunk_size: int = 500, overlap: int = 50)
                 })
                 chunk_index += 1
                 
-                # Naive overlap: keep the last paragraph if it fits in overlap
-                # (A better implementation would use LangChain's RecursiveCharacterTextSplitter with length_function=num_tokens_from_string)
+                # Naive overlap
                 current_chunk_text = para + "\n\n"
                 current_chunk_tokens = para_tokens
             else:
@@ -103,15 +100,3 @@ def process_documents(documents: List[Dict[str, Any]], chunk_size: int = 500, ov
             
         all_chunks.extend(doc_chunks)
     return all_chunks
-
-if __name__ == "__main__":
-    # Quick test
-    sample_doc = {
-        "text": "This is a test document. " * 50 + "\n\n" + "Here is a new paragraph. " * 50,
-        "source": "test.txt",
-        "metadata": {"filepath": "/path/to/test.txt"}
-    }
-    chunks = process_documents([sample_doc], chunk_size=50)
-    print(f"Generated {len(chunks)} chunks.")
-    for i, c in enumerate(chunks[:2]):
-        print(f"Chunk {i} tokens: {num_tokens_from_string(c['text'])}")

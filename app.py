@@ -40,6 +40,22 @@ with st.sidebar:
             
     st.divider()
     
+    if st.button("Remove All Files"):
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        if os.path.exists(data_dir):
+            removed_count = 0
+            for file_name in os.listdir(data_dir):
+                file_path = os.path.join(data_dir, file_name)
+                if os.path.isfile(file_path):
+                    try:
+                        os.remove(file_path)
+                        removed_count += 1
+                    except Exception as e:
+                        st.error(f"Failed to remove {file_name}: {e}")
+            st.success(f"Removed {removed_count} file(s) from the data folder.")
+        else:
+            st.info("Data folder is empty.")
+
     if st.button("Build/Rebuild Index"):
         with st.spinner("Building index..."):
             success = pipeline.build_index()
@@ -90,10 +106,17 @@ if prompt := st.chat_input("Ask a question about your documents..."):
             if sources:
                 with st.expander("View Sources"):
                     for i, source in enumerate(sources, start=1):
-                        meta = source.get("metadata", {})
-                        src_name = meta.get("source", "Unknown")
-                        st.markdown(f"**[{i}] Source: {src_name}**")
-                        st.text(source["text"])
+                        # Handle new citation format or fallback to chunk format
+                        if "text_snippet" in source:
+                            src_name = source.get("source", "Unknown")
+                            citation_mark = source.get("citation", f"[{i}]")
+                            st.markdown(f"**{citation_mark} Source: {src_name}**")
+                            st.text(source.get("text_snippet", ""))
+                        else:
+                            meta = source.get("metadata", {})
+                            src_name = meta.get("source", "Unknown")
+                            st.markdown(f"**[{i}] Source: {src_name}**")
+                            st.text(source.get("text", ""))
                         
     # Add assistant message to chat history
     st.session_state.messages.append({

@@ -1,5 +1,4 @@
 import os
-import glob
 from typing import List, Dict, Any
 from pypdf import PdfReader
 from docx import Document
@@ -75,12 +74,3 @@ def load_documents(data_dir: str) -> List[Dict[str, Any]]:
                 })
                 
     return documents
-
-if __name__ == "__main__":
-    # Test ingestion
-    data_directory = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-    docs = load_documents(data_directory)
-    print(f"Loaded {len(docs)} documents.")
-    if docs:
-        print(f"Sample source: {docs[0]['source']}")
-        print(f"Sample text length: {len(docs[0]['text'])} chars")
