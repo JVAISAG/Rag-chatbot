@@ -11,12 +11,15 @@ from src.retrieval.reranker import CrossEncoderReranker
 from src.retrieval.hybrid import HybridRetriever
 from src.generation.llm import LLMGenerator
 
+from src.agents.router import QueryRouter
+
 class RAGPipeline:
     def __init__(self, data_dir: str = "./data", db_path: str = "./chroma_db", llm_model: str = "llama3.2"):
         self.data_dir = data_dir
         self.store = VectorStore(db_path=db_path)
         self.embedding_model = get_embedding_model()
         self.llm_generator = LLMGenerator(model_name=llm_model)
+        self.router = QueryRouter(model_name=llm_model)
         
         # Initialize retrievers
         self.dense_retriever = DenseRetriever(self.store, self.embedding_model)
@@ -62,7 +65,7 @@ class RAGPipeline:
               history: List[Dict[str, str]] = None,
               use_hybrid: bool = False,
               use_reranking: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
-        """End-to-end retrieval and generation."""
+        """End-to-end retrieval and generation with agentic routing."""
         
         # 1. Condense query if history exists
         actual_query = user_query
@@ -71,21 +74,32 @@ class RAGPipeline:
             print(f"Original Query: {user_query}")
             print(f"Condensed Query: {actual_query}")
             
-        # 2. Retrieve chunks
+        # 2. Route the query
+        intent = self.router.route_query(actual_query)
+        print(f"Query classified as: {intent}")
+        
+        if intent == "SMALL_TALK":
+            answer = self.llm_generator.generate_small_talk_answer(actual_query)
+            return answer, []
+            
+        # Determine retrieval K based on intent
+        top_k = 15 if intent == "SUMMARIZATION" else 5
+            
+        # 3. Retrieve chunks
         if use_hybrid:
             # Temporarily disable reranker if use_reranking is False
             original_reranker = self.hybrid_retriever.reranker
             if not use_reranking:
                 self.hybrid_retriever.reranker = None
                 
-            chunks = self.hybrid_retriever.retrieve(query=actual_query, top_k=5, use_rrf=True)
+            chunks = self.hybrid_retriever.retrieve(query=actual_query, top_k=top_k, use_rrf=True)
             
             # Restore reranker
             self.hybrid_retriever.reranker = original_reranker
         else:
-            chunks = self.dense_retriever.retrieve(query=actual_query, top_k=5)
+            chunks = self.dense_retriever.retrieve(query=actual_query, top_k=top_k)
             
-        # 3. Generate Answer
+        # 4. Generate Answer
         answer, sources = self.llm_generator.generate_answer(actual_query, chunks)
         
         return answer, sources

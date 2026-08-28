@@ -51,6 +51,22 @@ Answer (with citations):"""
             print(f"Error generating answer from Ollama: {e}")
             return f"Error connecting to LLM ({self.model_name}). Make sure Ollama is running.", []
 
+    def generate_small_talk_answer(self, query: str) -> str:
+        """
+        Generate a direct response for small talk or greetings without using context.
+        """
+        prompt = f"""You are a friendly, helpful AI assistant. 
+The user is making small talk. Respond briefly and politely.
+
+User: {query}
+Answer:"""
+        try:
+            response = ollama.generate(model=self.model_name, prompt=prompt)
+            return response.get('response', '').strip()
+        except Exception as e:
+            print(f"Error generating small talk answer: {e}")
+            return "Hello! How can I help you today?"
+
     def condense_query(self, user_query: str, chat_history: List[Dict[str, str]]) -> str:
         """
         Rewrite a follow-up query to be a standalone query based on chat history.
