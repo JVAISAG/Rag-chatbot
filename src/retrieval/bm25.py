@@ -51,7 +51,7 @@ class BM25Retriever(Retriever):
         
         output = []
         for idx in top_indices:
-            if scores[idx] > 0: # Only return chunks that have some match
+            if scores[idx] != 0: # Only return chunks that have some match (BM25 can be negative in tiny corpuses)
                 chunk = self.corpus_chunks[idx]
                 output.append({
                     "id": f"{chunk['metadata'].get('source', 'unknown')}_{chunk['metadata'].get('chunk_index', idx)}",
