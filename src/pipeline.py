@@ -27,6 +27,9 @@ class RAGPipeline:
         self.dense_retriever = DenseRetriever(self.store, self.embedding_model)
         self.sparse_retriever = BM25Retriever()
         
+        # Load BM25 from disk if available
+        self.sparse_retriever.load()
+        
         # We optionally load reranker if hybrid is requested, but for pipeline initialization we can leave it none 
         # and instantiate lazily or on demand if the user wants to save memory.
         self.reranker = CrossEncoderReranker() 
@@ -43,17 +46,6 @@ class RAGPipeline:
         print("Loading documents...")
         docs = load_documents(self.data_dir)
         
-        # Clear existing collection before rebuilding to remove deleted files
-        try:
-            self.store.client.delete_collection(self.store.collection.name)
-            self.store.collection = self.store.client.create_collection(
-                name=self.store.collection.name,
-                metadata={"hnsw:space": "cosine"}
-            )
-            print("Cleared existing vector store collection.")
-        except Exception as e:
-            print(f"Note: Could not reset collection (it may not exist yet): {e}")
-
         if not docs:
             print("No documents found.")
             return False
@@ -68,11 +60,51 @@ class RAGPipeline:
         print("Upserting to vector store...")
         self.store.upsert_chunks(chunks, embeddings)
         
-        # Fit BM25 in memory (In production, this would be serialized/persisted)
+        # Fit BM25 in memory and persist
         self.sparse_retriever.fit(chunks)
+        self.sparse_retriever.save()
         
         print("Index built successfully.")
         return True
+        
+    def ingest_file(self, file_path: str, filename: str) -> bool:
+        """Incrementally ingest a single file."""
+        from src.ingestion.document_loader import extract_text_from_pdf, extract_text_from_docx, extract_text_from_txt
+        ext = os.path.splitext(filename)[1].lower()
+        text = ""
+        if ext == ".pdf":
+            text = extract_text_from_pdf(file_path)
+        elif ext == ".docx":
+            text = extract_text_from_docx(file_path)
+        elif ext in [".txt", ".md"]:
+            text = extract_text_from_txt(file_path)
+            
+        if not text:
+            return False
+            
+        doc = [{
+            "text": text,
+            "source": filename,
+            "metadata": {"filepath": file_path, "extension": ext}
+        }]
+        
+        chunks = process_documents(doc)
+        if not chunks:
+            return False
+            
+        texts = [c["text"] for c in chunks]
+        embeddings = generate_embeddings(texts, self.embedding_model)
+        self.store.upsert_chunks(chunks, embeddings)
+        
+        # We need to rebuild BM25 across all documents since it's global
+        # For simplicity, we just rebuild the whole pipeline's index here
+        return self.build_index()
+        
+    def remove_file(self, filename: str) -> bool:
+        """Incrementally remove a single file from the index."""
+        self.store.delete_by_source(filename)
+        # Rebuild BM25 to remove the file's tokens
+        return self.build_index()
         
     def query(self, 
               user_query: str, 

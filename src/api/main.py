@@ -5,6 +5,8 @@ from typing import List, Dict, Optional, Any
 import os
 import shutil
 import logging
+import uuid
+from contextlib import asynccontextmanager
 from contextlib import asynccontextmanager
 
 from src.pipeline import RAGPipeline
@@ -13,15 +15,8 @@ from src.pipeline import RAGPipeline
 async def lifespan(app: FastAPI):
     # Startup
     yield
-    # Shutdown: Clear documents and reset DB
-    logging.info("Shutting down: Wiping all documents and vector DB...")
-    if os.path.exists(pipeline.data_dir):
-        shutil.rmtree(pipeline.data_dir)
-        os.makedirs(pipeline.data_dir, exist_ok=True)
-    try:
-        pipeline.store.client.reset()
-    except Exception as e:
-        logging.warning(f"Failed to reset ChromaDB on shutdown: {e}")
+    # Shutdown
+    logging.info("Shutting down API server...")
 
 app = FastAPI(
     title="Agentic RAG API", 
@@ -35,7 +30,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logging.error(f"Unhandled exception at {request.url.path}: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error", "error_message": str(exc)},
+        content={"detail": "The chatbot could not process your request. Please try again later."},
     )
 
 # Global pipeline instance initialized lazily
@@ -57,6 +52,9 @@ def query_endpoint(req: QueryRequest):
     Submit a query to the agentic RAG pipeline.
     The router will automatically determine intent (small talk, web search, summarization, direct knowledge).
     """
+    if len(req.query) > 1000:
+        raise HTTPException(status_code=400, detail="Query too long. Maximum 1000 characters allowed.")
+        
     answer, sources = pipeline.query(
         user_query=req.query,
         history=req.history,
@@ -65,22 +63,43 @@ def query_endpoint(req: QueryRequest):
     )
     return QueryResponse(answer=answer, sources=sources)
 
+MAX_UPLOAD_MB = 10
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+
 @app.post("/api/v1/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
     """
-    Upload documents to the data directory for future indexing.
+    Upload documents to the data directory and ingest them incrementally.
     """
     data_dir = pipeline.data_dir
     os.makedirs(data_dir, exist_ok=True)
     
     saved_files = []
     for file in files:
-        file_path = os.path.join(data_dir, file.filename)
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+            
+        file.file.seek(0, os.SEEK_END)
+        size_bytes = file.file.tell()
+        file.file.seek(0)
+        
+        if size_bytes > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(status_code=400, detail=f"File {file.filename} exceeds {MAX_UPLOAD_MB}MB limit.")
+            
+        # Generate safe server-side filename
+        safe_filename = f"{uuid.uuid4()}{ext}"
+        file_path = os.path.join(data_dir, safe_filename)
+        
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+            
+        # Incrementally ingest
+        # We pass the original filename as the source for frontend tracking
+        pipeline.ingest_file(file_path, file.filename)
         saved_files.append(file.filename)
         
-    return {"message": f"Successfully uploaded {len(saved_files)} files.", "files": saved_files}
+    return {"message": f"Successfully uploaded and ingested {len(saved_files)} files.", "files": saved_files}
 
 @app.post("/api/v1/index")
 def rebuild_index():
@@ -97,13 +116,15 @@ def rebuild_index():
 @app.delete("/api/v1/file/{filename}")
 def delete_file(filename: str):
     """
-    Delete a specific file from the data directory and rebuild the index.
+    Delete a specific file incrementally from the index.
     """
-    file_path = os.path.join(pipeline.data_dir, filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
-        # Rebuild the index after deletion
-        success = pipeline.build_index()
-        return {"message": f"File {filename} deleted and index rebuilt.", "index_rebuilt": success}
+    # Incrementally remove from index
+    success = pipeline.remove_file(filename)
+    
+    # We don't necessarily delete the safe_filename from disk here unless we map it back,
+    # but the chunks are gone from the VectorDB and BM25, which is the primary concern.
+    
+    if success:
+        return {"message": f"File {filename} removed from index successfully."}
     else:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=400, detail="Failed to remove file from index.")

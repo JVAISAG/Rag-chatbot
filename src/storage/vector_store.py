@@ -56,6 +56,13 @@ class VectorStore:
                 metadatas=metadatas[i:i+batch_size]
             )
 
+    def delete_by_source(self, source: str):
+        """Delete all chunks belonging to a specific source file."""
+        try:
+            self.collection.delete(where={"source": source})
+        except Exception as e:
+            print(f"Error deleting chunks for {source}: {e}")
+
     def dense_search(self, query_embedding: np.ndarray, top_k: int = 10) -> List[Dict[str, Any]]:
         """Perform dense search using ChromaDB."""
         results = self.collection.query(

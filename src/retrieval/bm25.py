@@ -1,5 +1,7 @@
 from typing import List, Dict, Any
 import numpy as np
+import pickle
+import os
 from rank_bm25 import BM25Okapi
 from src.retrieval.base import Retriever
 
@@ -17,6 +19,24 @@ class BM25Retriever(Retriever):
             self.bm25 = BM25Okapi(tokenized_corpus)
         else:
             self.bm25 = None
+            
+    def save(self, file_path: str = "./data/bm25_index.pkl"):
+        """Persist BM25 index to disk."""
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "wb") as f:
+            pickle.dump(self.corpus_chunks, f)
+            
+    def load(self, file_path: str = "./data/bm25_index.pkl") -> bool:
+        """Load BM25 index from disk."""
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "rb") as f:
+                    chunks = pickle.load(f)
+                    self.fit(chunks)
+                return True
+            except Exception as e:
+                print(f"Error loading BM25 index: {e}")
+        return False
             
     def retrieve(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Perform sparse (keyword) search using BM25."""
