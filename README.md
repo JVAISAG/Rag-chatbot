@@ -49,14 +49,18 @@ Chunks are roughly ~500 tokens with a ~50-token overlap, sized via `tiktoken`. W
 ### 3. Fully Local Stack
 No paid APIs. We chose a 3B model (`llama3.2`) to comfortably fit within 8GB of system RAM alongside Python, Streamlit, and the two embedding models, without causing out-of-memory (OOM) errors.
 
+## 4. Web Augmented RAG
+The platform can dynamically route your queries to perform live internet searches (via DuckDuckGo) when your local documents don't have the answer!
+
+## Running the FastAPI Backend
+You can now run the backend as a headless API:
+```bash
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
+Then visit `http://localhost:8000/docs` in your browser to interact with the Swagger API documentation.
+
 ## Evaluation
 
 We evaluate the retrieval pipeline using a custom benchmark (`eval/eval_set.json`) measuring **Precision@3** (did the expected source document appear in the top 3 retrieved chunks?).
 
-| Configuration | Precision@3 |
-|---------------|-------------|
-| Baseline (Dense Only) | TBD |
-| Hybrid (Dense + BM25) | TBD |
-| Hybrid + Re-ranking   | TBD |
-
-*(Run `python eval/evaluate.py` to populate these metrics based on your actual data)*
+*(See `docs/EVALUATION.md` for our latest benchmarking results across Dense, BM25, and Hybrid setups)*
