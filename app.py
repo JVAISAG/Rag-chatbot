@@ -12,6 +12,8 @@ def safe_api_request(method: str, endpoint: str, **kwargs):
             res = requests.post(f"{API_URL}{endpoint}", **kwargs)
         elif method.upper() == "GET":
             res = requests.get(f"{API_URL}{endpoint}", **kwargs)
+        elif method.upper() == "DELETE":
+            res = requests.delete(f"{API_URL}{endpoint}", **kwargs)
         else:
             st.error(f"Unsupported HTTP method: {method}")
             return None
@@ -112,11 +114,29 @@ with st.sidebar:
     use_reranking = st.toggle("Use Re-ranking", value=False)
     
     st.header("📂 Data Management")
+    
+    # Track files for auto-deletion (only tracks files successfully synced to backend)
+    if "synced_files" not in st.session_state:
+        st.session_state.synced_files = set()
+        
     uploaded_files = st.file_uploader(
         "Upload Documents", 
         accept_multiple_files=True, 
         type=["pdf", "docx", "txt", "md"]
     )
+    
+    # Auto-sync deletions
+    current_file_names = {f.name for f in uploaded_files} if uploaded_files else set()
+    deleted_files = st.session_state.synced_files - current_file_names
+    
+    for deleted_file in deleted_files:
+        with st.spinner(f"Removing {deleted_file}..."):
+            data = safe_api_request("DELETE", f"/file/{deleted_file}")
+            if data:
+                st.success(f"Removed {deleted_file} and updated index.")
+                
+    # Update tracked state after deletions
+    st.session_state.synced_files = st.session_state.synced_files - deleted_files
     
     if uploaded_files:
         if st.button("Upload to Backend"):
@@ -127,6 +147,8 @@ with st.sidebar:
                 data = safe_api_request("POST", "/upload", files=files_payload)
                 if data:
                     st.success(f"Uploaded {len(uploaded_files)} file(s).")
+                    # Update synced state
+                    st.session_state.synced_files = current_file_names
             
     st.divider()
     

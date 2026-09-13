@@ -42,6 +42,18 @@ class RAGPipeline:
         """End-to-end ingestion, chunking, embedding, and indexing."""
         print("Loading documents...")
         docs = load_documents(self.data_dir)
+        
+        # Clear existing collection before rebuilding to remove deleted files
+        try:
+            self.store.client.delete_collection(self.store.collection.name)
+            self.store.collection = self.store.client.create_collection(
+                name=self.store.collection.name,
+                metadata={"hnsw:space": "cosine"}
+            )
+            print("Cleared existing vector store collection.")
+        except Exception as e:
+            print(f"Note: Could not reset collection (it may not exist yet): {e}")
+
         if not docs:
             print("No documents found.")
             return False

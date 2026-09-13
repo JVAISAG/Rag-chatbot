@@ -5,13 +5,29 @@ from typing import List, Dict, Optional, Any
 import os
 import shutil
 import logging
+from contextlib import asynccontextmanager
 
 from src.pipeline import RAGPipeline
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown: Clear documents and reset DB
+    logging.info("Shutting down: Wiping all documents and vector DB...")
+    if os.path.exists(pipeline.data_dir):
+        shutil.rmtree(pipeline.data_dir)
+        os.makedirs(pipeline.data_dir, exist_ok=True)
+    try:
+        pipeline.store.client.reset()
+    except Exception as e:
+        logging.warning(f"Failed to reset ChromaDB on shutdown: {e}")
 
 app = FastAPI(
     title="Agentic RAG API", 
     description="Production-grade Agentic RAG Platform API",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 @app.exception_handler(Exception)
@@ -77,3 +93,17 @@ def rebuild_index():
         return {"message": "Index rebuilt successfully."}
     else:
         raise HTTPException(status_code=400, detail="Failed to build index. Ensure data folder is not empty.")
+
+@app.delete("/api/v1/file/{filename}")
+def delete_file(filename: str):
+    """
+    Delete a specific file from the data directory and rebuild the index.
+    """
+    file_path = os.path.join(pipeline.data_dir, filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        # Rebuild the index after deletion
+        success = pipeline.build_index()
+        return {"message": f"File {filename} deleted and index rebuilt.", "index_rebuilt": success}
+    else:
+        raise HTTPException(status_code=404, detail="File not found")
