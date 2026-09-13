@@ -5,6 +5,42 @@ import requests
 # API Base URL
 API_URL = "http://localhost:8000/api/v1"
 
+def safe_api_request(method: str, endpoint: str, **kwargs):
+    """Centralized error handling for API requests."""
+    try:
+        if method.upper() == "POST":
+            res = requests.post(f"{API_URL}{endpoint}", **kwargs)
+        elif method.upper() == "GET":
+            res = requests.get(f"{API_URL}{endpoint}", **kwargs)
+        else:
+            st.error(f"Unsupported HTTP method: {method}")
+            return None
+            
+        if res.status_code == 200:
+            try:
+                return res.json()
+            except Exception:
+                return {"message": "Success", "raw": res.text}
+                
+        # Handle non-200 responses
+        try:
+            error_data = res.json()
+            err_msg = error_data.get("detail", res.text)
+        except Exception:
+            err_msg = res.text
+            
+        st.error(f"API Error ({res.status_code}): {err_msg}")
+        return None
+        
+    except requests.exceptions.ConnectionError:
+        st.error("Failed to connect to backend. Is the FastAPI server running?")
+    except requests.exceptions.Timeout:
+        st.error("Request timed out. The backend might be overloaded.")
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        
+    return None
+
 st.set_page_config(page_title="Personal Agentic RAG", layout="wide", initial_sidebar_state="expanded")
 
 # --- Custom Styling (Premium Dark Mode + Glassmorphism) ---
@@ -88,27 +124,17 @@ with st.sidebar:
                 files_payload = [
                     ("files", (f.name, f.getvalue(), f.type)) for f in uploaded_files
                 ]
-                try:
-                    res = requests.post(f"{API_URL}/upload", files=files_payload)
-                    if res.status_code == 200:
-                        st.success(f"Uploaded {len(uploaded_files)} file(s).")
-                    else:
-                        st.error(f"Upload failed: {res.text}")
-                except Exception as e:
-                    st.error(f"Connection error: {e}")
+                data = safe_api_request("POST", "/upload", files=files_payload)
+                if data:
+                    st.success(f"Uploaded {len(uploaded_files)} file(s).")
             
     st.divider()
     
     if st.button("🔄 Build/Rebuild Index"):
         with st.spinner("Rebuilding index on backend..."):
-            try:
-                res = requests.post(f"{API_URL}/index")
-                if res.status_code == 200:
-                    st.success("Index rebuilt successfully!")
-                else:
-                    st.error(f"Failed: {res.text}")
-            except Exception as e:
-                st.error(f"Connection error: {e}")
+            data = safe_api_request("POST", "/index")
+            if data:
+                st.success("Index rebuilt successfully!")
 
 # --- Chat Interface ---
 if "messages" not in st.session_state:
@@ -137,36 +163,30 @@ if prompt := st.chat_input("What would you like to know?"):
         with st.spinner("Agent is thinking..."):
             history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
             
-            try:
-                res = requests.post(f"{API_URL}/query", json={
-                    "query": prompt,
-                    "history": history,
-                    "use_hybrid": use_hybrid,
-                    "use_reranking": use_reranking
-                })
+            data = safe_api_request("POST", "/query", json={
+                "query": prompt,
+                "history": history,
+                "use_hybrid": use_hybrid,
+                "use_reranking": use_reranking
+            })
+            
+            if data:
+                answer = data.get("answer", "")
+                sources = data.get("sources", [])
                 
-                if res.status_code == 200:
-                    data = res.json()
-                    answer = data.get("answer", "")
-                    sources = data.get("sources", [])
-                    
-                    st.markdown(answer)
-                    if sources:
-                        with st.expander("🔍 View Sources"):
-                            for i, source in enumerate(sources, start=1):
-                                meta = source.get("metadata", {})
-                                src_name = meta.get("source", "Unknown")
-                                citation_mark = source.get("citation", f"[{i}]")
-                                st.markdown(f"**{citation_mark} Source: {src_name}**")
-                                text_snippet = source.get("text_snippet", source.get("text", ""))
-                                st.text(text_snippet)
-                                
-                    st.session_state.messages.append({
-                        "role": "assistant", 
-                        "content": answer,
-                        "sources": sources
-                    })
-                else:
-                    st.error(f"API Error: {res.text}")
-            except Exception as e:
-                st.error(f"Failed to connect to backend: {e}. Is the FastAPI server running?")
+                st.markdown(answer)
+                if sources:
+                    with st.expander("🔍 View Sources"):
+                        for i, source in enumerate(sources, start=1):
+                            meta = source.get("metadata", {})
+                            src_name = meta.get("source", "Unknown")
+                            citation_mark = source.get("citation", f"[{i}]")
+                            st.markdown(f"**{citation_mark} Source: {src_name}**")
+                            text_snippet = source.get("text_snippet", source.get("text", ""))
+                            st.text(text_snippet)
+                            
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": answer,
+                    "sources": sources
+                })

@@ -1,8 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Optional, Any
 import os
 import shutil
+import logging
 
 from src.pipeline import RAGPipeline
 
@@ -11,6 +13,14 @@ app = FastAPI(
     description="Production-grade Agentic RAG Platform API",
     version="1.0.0"
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logging.error(f"Unhandled exception at {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal Server Error", "error_message": str(exc)},
+    )
 
 # Global pipeline instance initialized lazily
 pipeline = RAGPipeline(llm_model="llama3.2")
@@ -31,16 +41,13 @@ def query_endpoint(req: QueryRequest):
     Submit a query to the agentic RAG pipeline.
     The router will automatically determine intent (small talk, web search, summarization, direct knowledge).
     """
-    try:
-        answer, sources = pipeline.query(
-            user_query=req.query,
-            history=req.history,
-            use_hybrid=req.use_hybrid,
-            use_reranking=req.use_reranking
-        )
-        return QueryResponse(answer=answer, sources=sources)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    answer, sources = pipeline.query(
+        user_query=req.query,
+        history=req.history,
+        use_hybrid=req.use_hybrid,
+        use_reranking=req.use_reranking
+    )
+    return QueryResponse(answer=answer, sources=sources)
 
 @app.post("/api/v1/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
@@ -64,10 +71,7 @@ def rebuild_index():
     """
     Rebuild the vector store index from the documents in the data directory.
     """
-    try:
-        success = pipeline.build_index()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    success = pipeline.build_index()
         
     if success:
         return {"message": "Index rebuilt successfully."}
