@@ -1,9 +1,0 @@
-Retrieval-Augmented Generation (RAG) is an architecture that augments the capabilities of a Large Language Model (LLM) by adding an information retrieval system that provides grounding data.
-
-In a typical RAG system, an external corpus of documents is chunked into smaller segments and encoded into dense vectors using an embedding model. These vectors are stored in a vector database like ChromaDB, FAISS, or Pinecone.
-
-When a user asks a question, the query is also embedded into a vector. The system then searches the vector database for the most similar chunks (often using cosine similarity or dot product). These chunks are retrieved and passed to the LLM alongside the original prompt.
-
-This approach significantly reduces hallucination, as the model bases its answer on the retrieved context rather than relying solely on its internal training weights. Furthermore, it allows the system to answer questions about proprietary or recent data that the LLM was not trained on, without the need for expensive fine-tuning.
-
-Advanced RAG techniques include query condensation, reciprocal rank fusion (RRF) combining sparse and dense retrieval, and cross-encoder re-ranking to improve the precision of the retrieved context.

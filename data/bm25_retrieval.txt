@@ -1,9 +1,0 @@
-BM25 (Best Matching 25) is a ranking function used by search engines to estimate the relevance of documents to a given search query. It is part of the Okapi BM25 family of scoring functions, rooted in the probabilistic retrieval framework developed in the 1970s and 1980s by Stephen Robertson, Karen Spärck Jones, and others.
-
-BM25 is a sparse retrieval method. It relies on exact keyword matches between the query and the document. The scoring function takes into account Term Frequency (TF) and Inverse Document Frequency (IDF).
-
-Unlike simple TF-IDF, BM25 uses term frequency saturation, meaning that the impact of a term appearing multiple times in a document tapers off. This is controlled by the hyperparameter k1 (usually set between 1.2 and 2.0).
-
-Another key component is document length normalization. BM25 penalizes long documents to ensure they do not unfairly rank higher just because they have more words. This is controlled by the hyperparameter b (usually set to 0.75). 
-
-While deep learning-based dense retrieval has become popular, BM25 remains extremely competitive and is often used in combination with dense methods in hybrid search architectures, where the results are fused using techniques like Reciprocal Rank Fusion (RRF).

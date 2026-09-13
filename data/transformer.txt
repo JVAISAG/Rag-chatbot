@@ -1,9 +1,0 @@
-The Transformer is a deep learning architecture developed by Google Researchers and introduced in the 2017 paper "Attention Is All You Need". It is based entirely on attention mechanisms, dispensing with recurrence and convolutions entirely.
-
-The architecture consists of an encoder and a decoder. The encoder maps an input sequence of symbol representations to a sequence of continuous representations. The decoder then generates an output sequence of symbols one element at a time.
-
-A key feature of the Transformer is the Multi-Head Attention mechanism. Instead of performing a single attention function, it linearly projects the queries, keys, and values h times with different, learned linear projections.
-
-The Transformer architecture has become the foundation for many state-of-the-art large language models, including BERT (Bidirectional Encoder Representations from Transformers) and the GPT (Generative Pre-trained Transformer) series.
-
-Positional encoding is added to the input embeddings at the bottoms of the encoder and decoder stacks to inject some information about the relative or absolute position of the tokens in the sequence, since the model contains no recurrence or convolution.

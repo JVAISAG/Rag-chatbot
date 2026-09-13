@@ -53,7 +53,7 @@ embeddings/
 # =========================
 
 # Ignore local/private datasets
-data/
+/data/
 datasets/
 
 # Uploaded documents
