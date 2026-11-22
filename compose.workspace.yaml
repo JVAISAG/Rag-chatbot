@@ -1,0 +1,41 @@
+services:
+  ollama:
+    image: ollama/ollama@sha256:910d0d8107b538fb0894e63163eb195de0cc7aefcbc666dc62d3b18f71124592
+    profiles: [inference]
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      # The pinned llama.cpp runner otherwise retains up to 8 GiB of old prompts.
+      LLAMA_ARG_CACHE_RAM: "${WORKSPACE_OLLAMA_CACHE_RAM_MB:-0}"
+      LLAMA_ARG_CTX_CHECKPOINTS: "0"
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - workspace_ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16
+    environment:
+      POSTGRES_USER: ${WORKSPACE_DB_USER:-research_workspace}
+      POSTGRES_DB: ${WORKSPACE_DB_NAME:-research_workspace}
+      POSTGRES_PASSWORD: ${WORKSPACE_DB_PASSWORD:?Set WORKSPACE_DB_PASSWORD in your local .env file}
+    ports:
+      - "127.0.0.1:${WORKSPACE_DB_PORT:-5433}:5432"
+    volumes:
+      - workspace_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  workspace_ollama_data:
+  workspace_postgres_data:

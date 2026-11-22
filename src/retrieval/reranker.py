@@ -1,11 +1,28 @@
+from __future__ import annotations
+
 import functools
-from typing import List, Dict, Any
-from sentence_transformers import CrossEncoder
+import os
+from pathlib import Path
+from src.errors import ModelUnavailableError
+from src.embeddings.models import configure_cpu_runtime
+from typing import List, Dict, Any, TYPE_CHECKING
+configure_cpu_runtime()
+
+os.environ.setdefault("HF_HOME", str(Path(__file__).resolve().parents[2] / ".cache" / "huggingface"))
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
+
+if TYPE_CHECKING:
+    from sentence_transformers import CrossEncoder
 
 @functools.lru_cache(maxsize=1)
 def get_cross_encoder(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> CrossEncoder:
     """Load the cross-encoder for reranking. Cached to avoid reloading."""
-    return CrossEncoder(model_name, device="cpu")
+    try:
+        from sentence_transformers import CrossEncoder
+
+        return CrossEncoder(model_name, device="cpu")
+    except Exception as exc:
+        raise ModelUnavailableError("Reranking model unavailable. Run python scripts/prepare_models.py --reranker first.") from exc
 
 class CrossEncoderReranker:
     def __init__(self, model: CrossEncoder = None):
@@ -13,7 +30,7 @@ class CrossEncoderReranker:
         
     def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
         """Rerank candidates using a cross-encoder."""
-        if not candidates:
+        if not candidates or top_k <= 0:
             return []
             
         if self.model is None:

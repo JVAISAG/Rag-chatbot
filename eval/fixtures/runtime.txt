@@ -1,0 +1,5 @@
+The application runs a Streamlit interface and a FastAPI backend. Ollama serves the local language model. Chroma persists the dense document index.
+
+A liveness endpoint reports whether the API responds. A readiness check can test storage access and whether Ollama lists the configured model. It does not prove answer quality.
+
+Request timeouts prevent calls from waiting indefinitely. A failed model request should produce a service-unavailable response, rather than a successful answer containing an error message.

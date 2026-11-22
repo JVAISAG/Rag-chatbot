@@ -1,157 +1,222 @@
-from typing import List, Dict, Any, Tuple
-import os
+from pathlib import Path
+from contextlib import ExitStack
+import logging
+import re
+from threading import RLock
+from typing import Any, Dict, List, Tuple
+import uuid
 
-from src.ingestion.document_loader import load_documents
+import numpy as np
+
+from src.ingestion.document_loader import load_document, load_documents
 from src.chunking.text_splitter import process_documents
 from src.embeddings.models import generate_embeddings, get_embedding_model
+from src.errors import DocumentError
 from src.storage.vector_store import VectorStore
 from src.retrieval.dense import DenseRetriever
 from src.retrieval.bm25 import BM25Retriever
 from src.retrieval.reranker import CrossEncoderReranker
 from src.retrieval.hybrid import HybridRetriever
 from src.generation.llm import LLMGenerator
-
+from src.generation.client import DEFAULT_MODEL
 from src.agents.router import QueryRouter
 from src.agents.web_search import WebSearchTool
 
+
 class RAGPipeline:
-    def __init__(self, data_dir: str = "./data", db_path: str = "./chroma_db", llm_model: str = "llama3.2"):
-        self.data_dir = data_dir
-        self.store = VectorStore(db_path=db_path)
-        self.embedding_model = get_embedding_model()
-        self.llm_generator = LLMGenerator(model_name=llm_model)
-        self.router = QueryRouter(model_name=llm_model)
+    def __init__(self, data_dir="./data", db_path="./chroma_db", llm_model=DEFAULT_MODEL, *,
+                 store=None, embedding_model=None, llm_generator=None, router=None):
+        self.data_dir = str(Path(data_dir).resolve())
+        self._lock = RLock()
+        self.store = store if store is not None else VectorStore(db_path=db_path)
+        self._embedding_model = embedding_model
+        self.llm_generator = llm_generator or LLMGenerator(model_name=llm_model)
+        self.router = router or QueryRouter(model_name=llm_model)
         self.web_search = WebSearchTool(max_results=5)
-        
-        # Initialize retrievers
-        self.dense_retriever = DenseRetriever(self.store, self.embedding_model)
+        self.dense_retriever = DenseRetriever(self.store, embedding_model)
         self.sparse_retriever = BM25Retriever()
-        
-        # Load BM25 from disk if available
-        self.sparse_retriever.load()
-        
-        # We optionally load reranker if hybrid is requested, but for pipeline initialization we can leave it none 
-        # and instantiate lazily or on demand if the user wants to save memory.
-        self.reranker = CrossEncoderReranker() 
-        
-        # The hybrid retriever orchestrates dense + sparse + reranker
-        self.hybrid_retriever = HybridRetriever(
-            dense_retriever=self.dense_retriever,
-            sparse_retriever=self.sparse_retriever,
-            reranker=self.reranker
-        )
-        
-    def build_index(self):
-        """End-to-end ingestion, chunking, embedding, and indexing."""
-        print("Loading documents...")
-        docs = load_documents(self.data_dir)
-        
-        if not docs:
-            print("No documents found.")
-            return False
-            
-        print("Chunking documents...")
-        chunks = process_documents(docs)
-        
-        print("Generating embeddings...")
-        texts = [c["text"] for c in chunks]
-        embeddings = generate_embeddings(texts, self.embedding_model)
-        
-        print("Upserting to vector store...")
-        self.store.upsert_chunks(chunks, embeddings)
-        
-        # Fit BM25 in memory and persist
-        self.sparse_retriever.fit(chunks)
-        self.sparse_retriever.save()
-        
-        print("Index built successfully.")
-        return True
-        
-    def ingest_file(self, file_path: str, filename: str) -> bool:
-        """Incrementally ingest a single file."""
-        from src.ingestion.document_loader import extract_text_from_pdf, extract_text_from_docx, extract_text_from_txt
-        ext = os.path.splitext(filename)[1].lower()
-        text = ""
-        if ext == ".pdf":
-            text = extract_text_from_pdf(file_path)
-        elif ext == ".docx":
-            text = extract_text_from_docx(file_path)
-        elif ext in [".txt", ".md"]:
-            text = extract_text_from_txt(file_path)
-            
-        if not text:
-            return False
-            
-        doc = [{
-            "text": text,
-            "source": filename,
-            "metadata": {"filepath": file_path, "extension": ext}
-        }]
-        
-        chunks = process_documents(doc)
+        # One authoritative corpus: no separate stale/global pickle index.
+        current = self.store.get_all_chunks()
+        self._recover_staged_files(current)
+        self.sparse_retriever.fit(current)
+        self.reranker = CrossEncoderReranker()
+        self.hybrid_retriever = HybridRetriever(self.dense_retriever, self.sparse_retriever, self.reranker)
+
+    def close(self):
+        with ExitStack() as cleanup:
+            cleanup.callback(self.router.client.close)
+            cleanup.callback(self.llm_generator.client.close)
+            cleanup.callback(self.store.close)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    @property
+    def embedding_model(self):
+        if self._embedding_model is None:
+            self._embedding_model = get_embedding_model()
+            self.dense_retriever.embedding_model = self._embedding_model
+        return self._embedding_model
+
+    def _embeddings(self, chunks):
         if not chunks:
-            return False
-            
-        texts = [c["text"] for c in chunks]
-        embeddings = generate_embeddings(texts, self.embedding_model)
-        self.store.upsert_chunks(chunks, embeddings)
-        
-        # We need to rebuild BM25 across all documents since it's global
-        # For simplicity, we just rebuild the whole pipeline's index here
-        return self.build_index()
-        
+            return np.empty((0, 0))
+        return generate_embeddings([chunk["text"] for chunk in chunks], self.embedding_model)
+
+    def _chunk_documents(self, documents):
+        if not documents:
+            return []
+        model = self.embedding_model
+        limit = min(500, getattr(model, "max_seq_length", 500))
+        tokenizer = getattr(model, "tokenizer", None)
+        counter = (lambda text: len(tokenizer.encode(text, add_special_tokens=True))) if tokenizer is not None else None
+        return process_documents(documents, chunk_size=limit, overlap=min(50, limit // 5), token_counter=counter)
+
+    def _safe_path(self, file_path):
+        path = Path(file_path).resolve()
+        if not path.is_relative_to(Path(self.data_dir)) or path == Path(self.data_dir):
+            raise DocumentError("Document paths must stay inside the data directory.")
+        return path
+
+    def _source_overrides(self, chunks):
+        overrides = {}
+        for chunk in chunks:
+            meta = chunk["metadata"]
+            if meta.get("filepath"):
+                path = str(Path(meta["filepath"]).resolve())
+                source = meta["source"]
+                # Older uploads indexed the same path under a UUID and its real name.
+                if path not in overrides or source != Path(path).name:
+                    overrides[path] = source
+        return overrides
+
+    def _recover_staged_files(self, chunks):
+        referenced = {str(Path(chunk["metadata"]["filepath"]).resolve())
+                      for chunk in chunks if chunk["metadata"].get("filepath")}
+        for temporary in Path(self.data_dir).rglob("*.pending-delete"):
+            match = re.fullmatch(r"\.(.+)\.([0-9a-f]{32})\.pending-delete", temporary.name)
+            if not match:
+                continue
+            original = self._safe_path(temporary.with_name(match.group(1)))
+            if str(original) in referenced:
+                if not original.exists():
+                    temporary.rename(original)
+            else:
+                temporary.unlink()
+
+    def build_index(self):
+        with self._lock:
+            previous = self.store.get_all_chunks()
+            docs = load_documents(self.data_dir, self._source_overrides(previous))
+            chunks = self._chunk_documents(docs)
+            embeddings = self._embeddings(chunks)
+            # Prepare the sparse index before any writes, including the empty case.
+            sparse = BM25Retriever()
+            sparse.fit(chunks)
+            self.store.replace_chunks(chunks, embeddings)
+            self.sparse_retriever = sparse
+            self.hybrid_retriever.sparse = sparse
+            return True
+
+    def ingest_file(self, file_path: str, filename: str) -> bool:
+        with self._lock:
+            path = self._safe_path(file_path)
+            docs = load_document(str(path), filename)
+            current = self.store.get_all_chunks()
+            existing = [chunk for chunk in current if chunk["metadata"].get("source") == filename]
+            digest = docs[0]["metadata"]["file_hash"]
+            if existing and all(chunk["metadata"].get("file_hash") == digest for chunk in existing):
+                retained = {str(Path(chunk["metadata"]["filepath"]).resolve()) for chunk in existing}
+                if str(path) not in retained:
+                    path.unlink()
+                return True
+            chunks = self._chunk_documents(docs)
+            embeddings = self._embeddings(chunks)
+            sparse = BM25Retriever()
+            sparse.fit([chunk for chunk in current if chunk["metadata"].get("source") != filename] + chunks)
+            old_paths = {self._safe_path(chunk["metadata"]["filepath"]) for chunk in existing if chunk["metadata"].get("filepath")}
+            staged = self._stage_files(old_paths - {path})
+            try:
+                self.store.replace_chunks(chunks, embeddings, source=filename)
+            except Exception:
+                self._restore_files(staged)
+                raise
+            self.sparse_retriever = sparse
+            self.hybrid_retriever.sparse = sparse
+            self._finish_files(staged)
+            return True
+
+    def _stage_files(self, paths):
+        staged = []
+        try:
+            for path in paths:
+                if path.exists():
+                    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.pending-delete")
+                    path.rename(temporary)
+                    staged.append((path, temporary))
+            return staged
+        except Exception:
+            self._restore_files(staged)
+            raise
+
+    @staticmethod
+    def _restore_files(staged):
+        for original, temporary in staged:
+            temporary.rename(original)
+
+    @staticmethod
+    def _finish_files(staged):
+        for _, temporary in staged:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                logging.getLogger(__name__).warning("A staged document could not be removed; it will not be indexed.")
+
     def remove_file(self, filename: str) -> bool:
-        """Incrementally remove a single file from the index."""
-        self.store.delete_by_source(filename)
-        # Rebuild BM25 to remove the file's tokens
-        return self.build_index()
-        
-    def query(self, 
-              user_query: str, 
-              history: List[Dict[str, str]] = None,
-              use_hybrid: bool = False,
-              use_reranking: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
-        """End-to-end retrieval and generation with agentic routing."""
-        
-        # 1. Condense query if history exists
-        actual_query = user_query
-        if history:
-            actual_query = self.llm_generator.condense_query(user_query, history)
-            print(f"Original Query: {user_query}")
-            print(f"Condensed Query: {actual_query}")
-            
-        # 2. Route the query
+        with self._lock:
+            current = self.store.get_all_chunks()
+            existing = [chunk for chunk in current if chunk["metadata"].get("source") == filename]
+            if not existing:
+                return False
+            sparse = BM25Retriever()
+            sparse.fit([chunk for chunk in current if chunk["metadata"].get("source") != filename])
+            paths = {self._safe_path(chunk["metadata"]["filepath"]) for chunk in existing if chunk["metadata"].get("filepath")}
+            staged = self._stage_files(paths)
+            try:
+                self.store.delete_by_source(filename)
+            except Exception:
+                self._restore_files(staged)
+                raise
+            self.sparse_retriever = sparse
+            self.hybrid_retriever.sparse = sparse
+            self._finish_files(staged)
+            return True
+
+    def list_files(self):
+        with self._lock:
+            counts = {}
+            for chunk in self.store.get_all_chunks():
+                source = chunk["metadata"].get("source", "Unknown")
+                counts[source] = counts.get(source, 0) + 1
+            return [{"name": name, "chunks": count} for name, count in sorted(counts.items())]
+
+    def query(self, user_query: str, history: List[Dict[str, str]] = None,
+              use_hybrid: bool = False, use_reranking: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
+        actual_query = self.llm_generator.condense_query(user_query, history) if history else user_query
         intent = self.router.route_query(actual_query)
-        print(f"Query classified as: {intent}")
-        
         if intent == "SMALL_TALK":
-            answer = self.llm_generator.generate_small_talk_answer(actual_query)
-            return answer, []
-            
+            return self.llm_generator.generate_small_talk_answer(actual_query), []
         if intent == "WEB_SEARCH":
-            print("Fetching context from the web...")
-            chunks = self.web_search.search(actual_query)
-            answer, sources = self.llm_generator.generate_answer(actual_query, chunks)
-            return answer, sources
-            
-        # Determine retrieval K based on intent
+            return self.llm_generator.generate_answer(actual_query, self.web_search.search(actual_query))
         top_k = 15 if intent == "SUMMARIZATION" else 5
-            
-        # 3. Retrieve chunks
-        if use_hybrid:
-            # Temporarily disable reranker if use_reranking is False
-            original_reranker = self.hybrid_retriever.reranker
-            if not use_reranking:
-                self.hybrid_retriever.reranker = None
-                
-            chunks = self.hybrid_retriever.retrieve(query=actual_query, top_k=top_k, use_rrf=True)
-            
-            # Restore reranker
-            self.hybrid_retriever.reranker = original_reranker
-        else:
-            chunks = self.dense_retriever.retrieve(query=actual_query, top_k=top_k)
-            
-        # 4. Generate Answer
-        answer, sources = self.llm_generator.generate_answer(actual_query, chunks)
-        
-        return answer, sources
+        with self._lock:
+            if use_hybrid:
+                chunks = self.hybrid_retriever.retrieve(actual_query, top_k, use_reranking=use_reranking)
+            else:
+                chunks = self.dense_retriever.retrieve(actual_query, top_k=top_k * 2 if use_reranking else top_k)
+                if use_reranking:
+                    chunks = self.reranker.rerank(actual_query, chunks, top_k=top_k)
+        return self.llm_generator.generate_answer(actual_query, chunks)

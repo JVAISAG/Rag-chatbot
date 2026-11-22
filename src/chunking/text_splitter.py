@@ -1,102 +1,91 @@
+"""Unicode-safe chunks with an enforced token limit and real overlap."""
+
+from functools import lru_cache
+import os
+from pathlib import Path
+import re
+from typing import Any, Dict, List
+
 import tiktoken
-from typing import List, Dict, Any
+
+from src.errors import ModelUnavailableError
+
+os.environ.setdefault("TIKTOKEN_CACHE_DIR", str(Path(__file__).resolve().parents[2] / ".cache" / "tiktoken"))
+
+
+@lru_cache(maxsize=4)
+def get_encoding(encoding_name: str = "cl100k_base"):
+    try:
+        return tiktoken.get_encoding(encoding_name)
+    except Exception as exc:
+        raise ModelUnavailableError("Tokenizer unavailable. Run python scripts/prepare_models.py while online first.") from exc
+
 
 def num_tokens_from_string(string: str, encoding_name: str = "cl100k_base") -> int:
-    """Returns the number of tokens in a text string."""
-    encoding = tiktoken.get_encoding(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
+    return len(get_encoding(encoding_name).encode(string, disallowed_special=()))
 
-def chunk_text(text: str, source: str, chunk_size: int = 500, overlap: int = 50) -> List[Dict[str, Any]]:
-    """
-    Splits text recursively by paragraphs, then sentences if necessary,
-    based on token counts.
-    """
-    chunks = []
-    
-    # Very basic recursive splitting logic:
-    # 1. Split by double newline (paragraphs)
-    paragraphs = text.split('\n\n')
-    
-    current_chunk_text = ""
-    current_chunk_tokens = 0
-    chunk_index = 0
-    
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-            
-        para_tokens = num_tokens_from_string(para)
-        
-        # If a single paragraph is too big, split it by sentence
-        if para_tokens > chunk_size:
-            sentences = para.replace('. ', '.\n').split('\n')
-            for sentence in sentences:
-                sentence = sentence.strip()
-                if not sentence:
-                    continue
-                
-                sentence_tokens = num_tokens_from_string(sentence)
-                if current_chunk_tokens + sentence_tokens > chunk_size and current_chunk_text:
-                    # Save current chunk
-                    chunks.append({
-                        "text": current_chunk_text.strip(),
-                        "metadata": {
-                            "source": source,
-                            "chunk_index": chunk_index
-                        }
-                    })
-                    chunk_index += 1
-                    
-                    # Overlap handling (simplistic)
-                    current_chunk_text = sentence + " "
-                    current_chunk_tokens = sentence_tokens
-                else:
-                    current_chunk_text += sentence + " "
-                    current_chunk_tokens += sentence_tokens
+
+def _prefix_length(text: str, budget: int, token_counter=num_tokens_from_string) -> int:
+    # Work on characters, never decoded partial UTF-8 tokens.
+    low, high = 0, min(len(text), budget * 16)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if token_counter(text[:mid]) <= budget:
+            low = mid
         else:
-            if current_chunk_tokens + para_tokens > chunk_size and current_chunk_text:
-                chunks.append({
-                    "text": current_chunk_text.strip(),
-                    "metadata": {
-                        "source": source,
-                        "chunk_index": chunk_index
-                    }
-                })
-                chunk_index += 1
-                
-                # Naive overlap
-                current_chunk_text = para + "\n\n"
-                current_chunk_tokens = para_tokens
-            else:
-                current_chunk_text += para + "\n\n"
-                current_chunk_tokens += para_tokens
-                
-    if current_chunk_text.strip():
-        chunks.append({
-            "text": current_chunk_text.strip(),
-            "metadata": {
-                "source": source,
-                "chunk_index": chunk_index
-            }
-        })
-        
+            high = mid - 1
+    return low
+
+
+def chunk_text(text: str, source: str, chunk_size: int = 500, overlap: int = 50, *, token_counter=None) -> List[Dict[str, Any]]:
+    if chunk_size <= 0 or not 0 <= overlap < chunk_size:
+        raise ValueError("Require chunk_size > 0 and 0 <= overlap < chunk_size.")
+    chunks = []
+    count_tokens = token_counter or num_tokens_from_string
+    start = 0
+    while start < len(text):
+        remaining = text[start:]
+        length = _prefix_length(remaining, chunk_size, count_tokens)
+        if not length:
+            raise ValueError("chunk_size is too small to encode a character in this document.")
+        if length < len(remaining):
+            boundaries = list(re.finditer(r"\n\s*\n|(?<=[.!?])\s+|\s+", remaining[:length]))
+            preferred = [m.end() for m in boundaries if m.end() >= length // 2]
+            if preferred and count_tokens(remaining[:preferred[-1]]) <= chunk_size:
+                length = preferred[-1]
+        end = start + length
+        content = text[start:end]
+        if content.strip():
+            chunks.append({
+                "text": content,
+                "metadata": {"source": source, "chunk_index": len(chunks)},
+            })
+        if end == len(text):
+            break
+        suffix_length = 0
+        if overlap:
+            low, high = 0, len(content)
+            while low < high:
+                mid = (low + high + 1) // 2
+                if count_tokens(content[-mid:]) <= overlap:
+                    low = mid
+                else:
+                    high = mid - 1
+            suffix_length = low
+        start = max(start + 1, end - suffix_length)
     return chunks
 
-def process_documents(documents: List[Dict[str, Any]], chunk_size: int = 500, overlap: int = 50) -> List[Dict[str, Any]]:
-    """Process a list of documents into chunks."""
+
+def process_documents(documents: List[Dict[str, Any]], chunk_size: int = 500, overlap: int = 50, *, token_counter=None) -> List[Dict[str, Any]]:
     all_chunks = []
+    source_indices = {}
     for doc in documents:
-        text = doc["text"]
         source = doc["source"]
-        doc_chunks = chunk_text(text, source, chunk_size, overlap)
-        
-        # Merge existing metadata from doc with chunk metadata
-        for chunk in doc_chunks:
-            merged_meta = doc["metadata"].copy()
-            merged_meta.update(chunk["metadata"])
-            chunk["metadata"] = merged_meta
-            
-        all_chunks.extend(doc_chunks)
+        for chunk in chunk_text(doc["text"], source, chunk_size, overlap, token_counter=token_counter):
+            index = source_indices.get(source, 0)
+            chunk["metadata"] = {
+                **doc.get("metadata", {}), **chunk["metadata"], "chunk_index": index,
+            }
+            source_indices[source] = index + 1
+            all_chunks.append(chunk)
     return all_chunks

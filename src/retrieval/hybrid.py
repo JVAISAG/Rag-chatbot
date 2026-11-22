@@ -14,13 +14,16 @@ class HybridRetriever(Retriever):
         self.sparse = sparse_retriever
         self.reranker = reranker
         
-    def retrieve(self, query: str, top_k: int = 10, use_rrf: bool = True) -> List[Dict[str, Any]]:
+    def retrieve(self, query: str, top_k: int = 10, use_rrf: bool = True, use_reranking: bool = True) -> List[Dict[str, Any]]:
         """
         Hybrid retrieval combining dense and sparse results.
         If use_rrf is True, uses Reciprocal Rank Fusion.
         Otherwise, returns dense results as primary (naive fallback).
         Applies reranker if configured.
         """
+        if top_k <= 0 or not query.strip():
+            return []
+        reranker = self.reranker if use_reranking else None
         # Fetch more candidates to allow effective fusion and reranking
         fetch_k = top_k * 2
         
@@ -29,7 +32,7 @@ class HybridRetriever(Retriever):
         
         if use_rrf:
             fused_results = reciprocal_rank_fusion(dense_results, sparse_results)
-            results = fused_results[:top_k] if not self.reranker else fused_results
+            results = fused_results[:top_k] if not reranker else fused_results
         else:
             # Naive hybrid (just combine and take unique, favor dense)
             results = dense_results.copy()
@@ -39,7 +42,7 @@ class HybridRetriever(Retriever):
                     results.append(r)
                     seen_ids.add(r["id"])
                     
-        if self.reranker:
-            return self.reranker.rerank(query, results, top_k=top_k)
+        if reranker:
+            return reranker.rerank(query, results, top_k=top_k)
             
         return results[:top_k]

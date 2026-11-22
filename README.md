@@ -1,76 +1,154 @@
-# Personal RAG Chatbot (Fully Local)
+# Research workspace and local RAG assistant
 
-A robust Retrieval-Augmented Generation (RAG) chatbot designed to answer questions over personal documents (PDFs, DOCX, Markdown) using a **100% local, free architecture**.
+A private research workspace for papers, blogs, and articles, built with Next.js,
+FastAPI, PostgreSQL/pgvector, and local Ollama inference. Search combines BM25,
+dense retrieval, reciprocal rank fusion, and a cross-encoder reranker.
 
-## Features & Architecture
+## Start the research workspace
 
-This project implements an advanced retrieval pipeline built from scratch to demonstrate production-grade RAG concepts:
+Follow the [local release runbook](docs/LOCAL_RELEASE.md) for database/model
+preparation, migrations, CPU or NVIDIA Docker inference, and service startup.
+Open **http://127.0.0.1:3000/** after starting the workspace.
 
-1. **Token-Aware Chunking:** Uses `tiktoken` to split text by tokens (not characters), preventing context window overflows.
-2. **Hybrid Search (Dense + Sparse):**
-   - **Dense:** `sentence-transformers` (`all-MiniLM-L6-v2`) + ChromaDB (HNSW).
-   - **Sparse:** `rank_bm25` persistent index for exact keyword matching (acronyms, dates).
-3. **Reciprocal Rank Fusion (RRF):** Fuses dense and sparse rankings without score normalization issues.
-4. **Cross-Encoder Re-ranking:** Uses `ms-marco-MiniLM-L-6-v2` to jointly score query and candidate chunks, significantly improving top-K precision.
-5. **Incremental Ingestion:** Uploads are hashed and indexed incrementally without rebuilding the entire vector store, saving compute resources.
-6. **Local LLM Generation:** Uses Ollama (`llama3.2` 3B model) for free, local answer generation with inline citations.
-7. **Query Routing:** Rewrites follow-up questions and routes between Small Talk, Local Knowledge, Summarization, and Live Web Search.
+The workspace includes accounts, collections, versioned file and public-URL
+imports, background jobs, a reader with original files, source-scoped cited
+conversations, checkpointed summaries, evidence comparisons, notes, and Markdown
+export. Saved evidence is pinned to revisions and becomes unavailable after
+source deletion. Note versions prevent conflicting edits from overwriting each
+other. The runbook also covers service diagnostics and verified backup/restore.
+The reader and questions share a responsive workspace. Answers expose recorded
+processing times; exact-excerpt fallbacks are labeled, and numeric dataset/model
+identifiers are checked against their cited passages.
+Sources also retain private tags and reading progress across collections; changed
+revisions become unread after successful publication.
 
-## Setup & Execution
+See the [plan and release scope](docs/RESEARCH_WORKSPACE_PLAN.md),
+[verification record](docs/WORKSPACE_VERIFICATION.md), and
+[performance measurements](docs/PERFORMANCE_NOTES.md). Generated claims need
+review against their passages; local synthetic tests do not establish scientific
+accuracy or production readiness.
 
-### Prerequisites
-1. **Ollama:** Install [Ollama](https://ollama.com/) and pull the model:
-   ```bash
-   ollama pull llama3.2
-   ```
-2. **Python Environment:**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+## Original single-user assistant
 
-### Running the Application (Local Deployment)
-This platform uses a decoupled architecture. You must run both the backend and frontend simultaneously.
+The original Streamlit/FastAPI application with Chroma persistence is retained
+separately and does not share the v2 workspace library. The instructions below
+describe that original application. It supports PDF, DOCX, TXT, and Markdown.
 
-1. **Start the FastAPI Backend:**
-   ```bash
-   uvicorn src.api.main:app --host 127.0.0.1 --port 8000
-   ```
-2. **Start the Streamlit Frontend (in a new terminal):**
-   ```bash
-   streamlit run app.py
-   ```
-3. Open `http://localhost:8501` to use the chatbot. You can upload documents directly through the UI, and they will be safely renamed, sized-checked, and incrementally ingested into the persistent vector database.
+## Setup (Python 3.12)
 
-### Exposing a Public Demo
-To share your local agent securely without renting cloud GPUs, you can use Cloudflare Tunnels or ngrok to expose your frontend:
-```bash
-cloudflared tunnel --url http://localhost:8501
-# OR
-ngrok http 8501
+From the project directory on Windows:
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python scripts/prepare_models.py --embeddings --reranker
 ```
-*(Note: Always secure your upload endpoints with authentication before sharing publicly.)*
 
-## Design Decisions
+On macOS/Linux, activate with `source venv/bin/activate` and copy configuration
+with `cp .env.example .env`. Dependency versions are pinned to the audited
+environment; transitive dependencies are not a complete lockfile.
 
-### 1. Bi-Encoder vs. Cross-Encoder
-Initial retrieval uses a fast Bi-Encoder (`all-MiniLM-L6-v2`) to narrow down thousands of chunks to the Top 10 in milliseconds using ChromaDB's HNSW graph. We then apply an expensive, highly accurate Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) only on those Top 10 chunks to re-rank and pick the best 3. This balances O(1) ANN search speed with O(N) Cross-Encoder precision.
+Install Ollama and prepare the configured generation model:
 
-### 2. Chunking Strategy
-Chunks are roughly ~500 tokens with a ~50-token overlap, sized via `tiktoken`. We split recursively (Paragraphs -> Sentences) to ensure chunks contain coherent ideas and prevent "lost in the middle" effects during LLM generation.
+```powershell
+ollama pull qwen3:4b-instruct-2507-q4_K_M
+```
 
-### 3. Fully Local Stack
-No paid APIs. We chose a 3B model (`llama3.2`) to comfortably fit within 8GB of system RAM alongside Python, Streamlit, and the two embedding models, without causing out-of-memory (OOM) errors.
+Alternatively, run the official Ollama Docker image using the optional service
+in [`docs/WORKSPACE_DATABASE.md`](docs/WORKSPACE_DATABASE.md#run-ollama-in-docker).
+Both options use the same local API address and configured Qwen3 4B model.
 
-## 4. Web Augmented RAG
-The platform can dynamically route your queries to perform live internet searches (via DuckDuckGo) when your local documents don't have the answer!
+The tokenizer vocabulary and retrieval models need internet access on first
+preparation. Their default cache is `.cache/` inside this project. After setup,
+document search and generation can run locally. Web-search queries contact
+DuckDuckGo and send the rewritten search query to that service. Chroma product
+telemetry is disabled. Model memory requirements depend on the machine; this
+repository does not promise an 8 GB memory limit.
 
-## API Documentation
-The FastAPI backend provides a Swagger UI for API exploration. Visit `http://localhost:8000/docs` in your browser.
+## Run
 
-## Evaluation
+Keep Ollama running. Start the API, using one worker:
 
-We evaluate the retrieval pipeline using a custom benchmark (`eval/eval_set.json`) measuring **Precision@3** (did the expected source document appear in the top 3 retrieved chunks?).
+```powershell
+python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
 
-*(See `docs/EVALUATION.md` for our latest benchmarking results across Dense, BM25, and Hybrid setups)*
+In another activated terminal:
+
+```powershell
+streamlit run app.py
+```
+
+Open `http://localhost:8501`. API documentation is at
+`http://127.0.0.1:8000/docs`.
+
+Configuration keys are in `.env.example`. The Streamlit frontend uses `BACKEND_URL`;
+the backend uses `DATA_DIR`, `CHROMA_PATH`, and the `OLLAMA_*` options.
+
+## Document behavior
+
+- Uploads index only the uploaded file; other documents are not re-embedded.
+- The original filename appears in citations. The saved upload uses a generated
+  filename, and its mapping is retained in indexed metadata.
+- Uploading the same filename and content is a no-op. Changed content under the
+  same filename replaces that document, including obsolete chunks and saved files.
+  Two different documents that share a filename must be renamed before uploading.
+- Removing an item from the upload picker does not delete a saved document.
+  Use its explicit Delete button in the saved document list.
+- Deletion removes saved files and both retrieval representations, including when
+  deleting the last document. A later rebuild does not restore a deleted upload.
+- Rebuild reconciles the entire index with supported files currently in `DATA_DIR`.
+  An empty data directory produces an empty index. A malformed document aborts
+  the rebuild before replacing the previous index.
+- PDF page metadata is preserved. Scanned PDFs require OCR before ingestion.
+- Uploads allow 10 files per request, 10 MB per file, and 25 MB total.
+  Partially successful parsing batches return per-file successes and errors.
+
+Before upgrading a real existing collection, back up `data/` and `chroma_db/`.
+Rebuild once to apply the corrected chunking and remove historical duplicate or
+stale records. Filenames already lost by an older index cannot always be recovered;
+the UUID filename is retained when no original-name mapping survives.
+
+## Health and errors
+
+- `GET /api/v1/health`: liveness, without initializing models or the database.
+- `GET /api/v1/ready`: checks storage and Ollama's configured model, and reports
+  whether the embedding model has been loaded. This does not test answer quality.
+- `GET /api/v1/files`: lists indexed document names and chunk counts.
+- Invalid query/history bodies return 422. Invalid documents return 400.
+  Missing documents return 404. Model failures return 503; unexpected failures
+  return a generic 500 response and are logged on the server.
+
+## Tests and evaluation
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python scripts/prepare_models.py
+python -m pytest -q
+python -m pip check
+```
+
+Tests substitute model outputs, use real Chroma databases in temporary directories,
+and exercise the API and Streamlit interface. They do not require a running Ollama
+server. See `docs/AUDIT.md` for the scope and remaining limitations. GitHub Actions
+contains the same regression checks; its remote execution has to run after a push.
+
+The retrieval smoke benchmark uses included public synthetic fixtures and a
+temporary database, never the application's persistent index:
+
+```powershell
+python eval/run.py --reranker
+```
+
+Use `--data-dir` and `--eval-set` to supply a separate labelled benchmark. The older
+`eval/eval_set.json` is a legacy dataset that requires its own source documents;
+it is not the default benchmark. `eval/evaluate.py` forwards to the same runner.
+
+## Scope
+
+The original Streamlit application is local, single-user, and single-worker. It does not implement
+authentication, user isolation, rate limiting, distributed indexing, or guaranteed
+cross-filesystem/database crash transactions. Do not expose it publicly as a
+multi-user service without adding those capabilities. See `docs/ARCHITECTURE.md`.

@@ -1,13 +1,20 @@
 import streamlit as st
 import os
 import requests
+from urllib.parse import quote
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # API Base URL
-API_URL = "http://localhost:8000/api/v1"
+API_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api/v1").rstrip("/")
+REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "360"))
 
 def safe_api_request(method: str, endpoint: str, **kwargs):
     """Centralized error handling for API requests."""
     try:
+        kwargs.setdefault("timeout", (5, REQUEST_TIMEOUT))
         if method.upper() == "POST":
             res = requests.post(f"{API_URL}{endpoint}", **kwargs)
         elif method.upper() == "GET":
@@ -18,16 +25,23 @@ def safe_api_request(method: str, endpoint: str, **kwargs):
             st.error(f"Unsupported HTTP method: {method}")
             return None
             
-        if res.status_code == 200:
+        if res.ok:
             try:
-                return res.json()
-            except Exception:
-                return {"message": "Success", "raw": res.text}
+                data = res.json()
+            except ValueError:
+                st.error("The backend returned an invalid response.")
+                return None
+            if not isinstance(data, dict):
+                st.error("The backend returned an invalid response.")
+                return None
+            for error in data.get("errors", []):
+                st.error(f"{error['file']}: {error['detail']}")
+            return data
                 
         # Handle non-200 responses
         try:
             error_data = res.json()
-            err_msg = error_data.get("detail", res.text)
+            err_msg = error_data.get("detail", error_data.get("errors", res.text))
         except Exception:
             err_msg = res.text
             
@@ -43,13 +57,22 @@ def safe_api_request(method: str, endpoint: str, **kwargs):
         
     return None
 
+
+def render_sources(sources):
+    with st.expander("🔍 View sources"):
+        for source in sources:
+            metadata = source.get("metadata", {})
+            name = source.get("source", metadata.get("source", "Unknown"))
+            citation = source.get("citation", "")
+            page = f", page {metadata['page']}" if "page" in metadata else ""
+            st.markdown(f"**{citation} {name}{page}**")
+            st.text(source.get("text_snippet", source.get("text", "")))
+
 st.set_page_config(page_title="Personal Agentic RAG", layout="wide", initial_sidebar_state="expanded")
 
 # --- Custom Styling (Premium Dark Mode + Glassmorphism) ---
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
-
 html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
@@ -115,28 +138,11 @@ with st.sidebar:
     
     st.header("📂 Data Management")
     
-    # Track files for auto-deletion (only tracks files successfully synced to backend)
-    if "synced_files" not in st.session_state:
-        st.session_state.synced_files = set()
-        
     uploaded_files = st.file_uploader(
         "Upload Documents", 
         accept_multiple_files=True, 
         type=["pdf", "docx", "txt", "md"]
     )
-    
-    # Auto-sync deletions
-    current_file_names = {f.name for f in uploaded_files} if uploaded_files else set()
-    deleted_files = st.session_state.synced_files - current_file_names
-    
-    for deleted_file in deleted_files:
-        with st.spinner(f"Removing {deleted_file}..."):
-            data = safe_api_request("DELETE", f"/file/{deleted_file}")
-            if data:
-                st.success(f"Removed {deleted_file} and updated index.")
-                
-    # Update tracked state after deletions
-    st.session_state.synced_files = st.session_state.synced_files - deleted_files
     
     if uploaded_files:
         if st.button("Upload to Backend"):
@@ -146,9 +152,16 @@ with st.sidebar:
                 ]
                 data = safe_api_request("POST", "/upload", files=files_payload)
                 if data:
-                    st.success(f"Uploaded {len(uploaded_files)} file(s).")
-                    # Update synced state
-                    st.session_state.synced_files = current_file_names
+                    st.success(data["message"])
+
+    documents = safe_api_request("GET", "/files")
+    if documents:
+        for document in documents.get("files", []):
+            name = document["name"]
+            st.caption(f"{name} · {document['chunks']} chunks")
+            if st.button(f"Delete {name}", key=f"delete_{name}"):
+                if safe_api_request("DELETE", f"/file/{quote(name, safe='')}"):
+                    st.rerun()
             
     st.divider()
     
@@ -166,16 +179,10 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message["role"] == "assistant" and "sources" in message and message["sources"]:
-            with st.expander("🔍 View Sources"):
-                for i, source in enumerate(message["sources"], start=1):
-                    meta = source.get("metadata", {})
-                    src_name = meta.get("source", "Unknown")
-                    st.markdown(f"**[{i}] Source: {src_name}**")
-                    text_snippet = source.get("text_snippet", source.get("text", ""))
-                    st.text(text_snippet)
+            render_sources(message["sources"])
 
 # --- Chat Input ---
-if prompt := st.chat_input("What would you like to know?"):
+if prompt := st.chat_input("What would you like to know?", max_chars=1000):
     st.session_state.messages.append({"role": "user", "content": prompt})
     
     with st.chat_message("user"):
@@ -183,7 +190,7 @@ if prompt := st.chat_input("What would you like to know?"):
         
     with st.chat_message("assistant"):
         with st.spinner("Agent is thinking..."):
-            history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1]]
+            history = [{"role": m["role"], "content": m["content"][:3000]} for m in st.session_state.messages[:-1][-6:]]
             
             data = safe_api_request("POST", "/query", json={
                 "query": prompt,
@@ -198,17 +205,11 @@ if prompt := st.chat_input("What would you like to know?"):
                 
                 st.markdown(answer)
                 if sources:
-                    with st.expander("🔍 View Sources"):
-                        for i, source in enumerate(sources, start=1):
-                            meta = source.get("metadata", {})
-                            src_name = meta.get("source", "Unknown")
-                            citation_mark = source.get("citation", f"[{i}]")
-                            st.markdown(f"**{citation_mark} Source: {src_name}**")
-                            text_snippet = source.get("text_snippet", source.get("text", ""))
-                            st.text(text_snippet)
+                    render_sources(sources)
                             
                 st.session_state.messages.append({
                     "role": "assistant", 
                     "content": answer,
                     "sources": sources
                 })
+                st.session_state.messages = st.session_state.messages[-60:]

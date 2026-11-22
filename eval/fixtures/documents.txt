@@ -1,0 +1,5 @@
+PDF ingestion should preserve page numbers so a user can locate cited evidence. A scanned PDF contains page images and requires optical character recognition (OCR) to obtain searchable text.
+
+A document content hash detects whether bytes changed. Replacing a document with a shorter version must remove its obsolete chunks. Deleting a document must remove both its saved file and its indexed passages.
+
+Chunk overlap repeats a small portion of adjacent passages to preserve context around boundaries. A token budget limits the amount of evidence supplied to a model.

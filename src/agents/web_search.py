@@ -1,5 +1,8 @@
+import logging
 from typing import List, Dict, Any
-from duckduckgo_search import DDGS
+from ddgs import DDGS
+
+from src.errors import WebSearchUnavailableError
 
 class WebSearchTool:
     """
@@ -13,11 +16,13 @@ class WebSearchTool:
         Search the web using DuckDuckGo and format results to match chunk schema.
         """
         try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=self.max_results))
+            with DDGS(timeout=15) as ddgs:
+                results = list(ddgs.text(query, max_results=self.max_results, backend="duckduckgo"))
                 
             formatted_chunks = []
             for item in results:
+                if not item.get("body", "").strip() or not item.get("href", "").startswith(("https://", "http://")):
+                    continue
                 formatted_chunks.append({
                     "text": item.get('body', ''),
                     "metadata": {
@@ -27,5 +32,5 @@ class WebSearchTool:
                 })
             return formatted_chunks
         except Exception as e:
-            print(f"Web search failed: {e}")
-            return []
+            logging.getLogger(__name__).warning("Web search unavailable (%s).", type(e).__name__)
+            raise WebSearchUnavailableError("Web search could not return usable results.") from e

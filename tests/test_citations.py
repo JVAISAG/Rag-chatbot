@@ -16,3 +16,15 @@ def test_format_references():
     assert len(refs) == 1
     assert refs[0]["citation"] == "[1]"
     assert refs[0]["source"] == "doc1"
+
+
+def test_citations_sort_numerically():
+    assert CitationExtractor.extract_citations("[10] [2] [1] [2]") == ["[1]", "[2]", "[10]"]
+
+
+def test_reference_metadata_omits_local_filepath():
+    refs = CitationExtractor.format_references([
+        {"text": "Short quote", "metadata": {"source": "notes.pdf", "page": 3, "filepath": "private/location"}}
+    ], ["[1]"])
+    assert refs[0]["metadata"] == {"source": "notes.pdf", "page": 3}
+    assert refs[0]["text_snippet"] == "Short quote"

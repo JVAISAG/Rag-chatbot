@@ -1,38 +1,23 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock
+
+import pytest
+
 from src.agents.router import QueryRouter
 
-@patch('ollama.generate')
-def test_query_router_small_talk(mock_generate):
-    mock_generate.return_value = {"response": "SMALL_TALK"}
-    router = QueryRouter()
-    intent = router.route_query("Hi there, how are you?")
-    assert intent == "SMALL_TALK"
-    assert mock_generate.called
 
-@patch('ollama.generate')
-def test_query_router_summarization(mock_generate):
-    mock_generate.return_value = {"response": " SUMMARIZATION "}
-    router = QueryRouter()
-    intent = router.route_query("Please summarize the documents for me.")
-    assert intent == "SUMMARIZATION"
+@pytest.mark.parametrize("classification,expected", [
+    ("SMALL_TALK", "SMALL_TALK"), (" SUMMARIZATION ", "SUMMARIZATION"),
+    ("DIRECT_KNOWLEDGE", "DIRECT_KNOWLEDGE"), ("WEB_SEARCH", "WEB_SEARCH"),
+    ("I am not sure.", "DIRECT_KNOWLEDGE"),
+    ("Not SMALL_TALK; choose WEB_SEARCH", "DIRECT_KNOWLEDGE"),
+])
+def test_router_accepts_only_exact_categories(classification, expected):
+    client = MagicMock()
+    client.generate.return_value = {"response": classification}
+    assert QueryRouter(client=client).route_query("a query") == expected
 
-@patch('ollama.generate')
-def test_query_router_direct_knowledge(mock_generate):
-    mock_generate.return_value = {"response": "DIRECT_KNOWLEDGE"}
-    router = QueryRouter()
-    intent = router.route_query("What is the main topic of document A?")
-    assert intent == "DIRECT_KNOWLEDGE"
 
-@patch('ollama.generate')
-def test_query_router_web_search(mock_generate):
-    mock_generate.return_value = {"response": "WEB_SEARCH"}
-    router = QueryRouter()
-    intent = router.route_query("Search online for the latest Python version.")
-    assert intent == "WEB_SEARCH"
-
-@patch('ollama.generate')
-def test_query_router_fallback(mock_generate):
-    mock_generate.return_value = {"response": "I am not sure."}
-    router = QueryRouter()
-    intent = router.route_query("Some weird query")
-    assert intent == "DIRECT_KNOWLEDGE" # Fallback behavior
+def test_router_outage_uses_local_retrieval():
+    client = MagicMock()
+    client.generate.side_effect = ConnectionError("offline")
+    assert QueryRouter(client=client).route_query("a query") == "DIRECT_KNOWLEDGE"

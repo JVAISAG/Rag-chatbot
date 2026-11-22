@@ -1,0 +1,14 @@
+[
+  {"question": "What does RAG supply to the language model?", "expected_source": "retrieval.txt"},
+  {"question": "Which ranking method combines lists using ranks instead of raw scores?", "expected_source": "retrieval.txt"},
+  {"question": "What does a cross-encoder jointly score?", "expected_source": "retrieval.txt"},
+  {"question": "Does BM25 use word matching or dense vectors?", "expected_source": "retrieval.txt"},
+  {"question": "Why should PDF ingestion retain page numbers?", "expected_source": "documents.txt"},
+  {"question": "What processing does a scanned PDF need?", "expected_source": "documents.txt"},
+  {"question": "What should be removed when replacing a document with a shorter version?", "expected_source": "documents.txt"},
+  {"question": "Why repeat text between adjacent chunks?", "expected_source": "documents.txt"},
+  {"question": "Which application serves the local language model?", "expected_source": "runtime.txt"},
+  {"question": "What is the difference between API liveness and readiness?", "expected_source": "runtime.txt"},
+  {"question": "Why do requests need timeouts?", "expected_source": "runtime.txt"},
+  {"question": "Which database persists the dense index?", "expected_source": "runtime.txt"}
+]

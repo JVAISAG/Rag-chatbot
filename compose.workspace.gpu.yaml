@@ -1,0 +1,4 @@
+# Optional NVIDIA GPU access. Base Compose remains usable on CPU-only machines.
+services:
+  ollama:
+    gpus: all

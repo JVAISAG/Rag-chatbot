@@ -1,168 +1,146 @@
+"""Retrieval-only benchmark, using an isolated temporary database by default."""
+
+import argparse
+from contextlib import contextmanager
+import gc
+from itertools import zip_longest
 import json
-import os
-import sys
 import math
-import numpy as np
-from typing import List, Dict, Any
+from pathlib import Path
+import sys
+import tempfile
+from time import perf_counter
+import time
 
-# Add src to path
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from src.pipeline import RAGPipeline
-from src.retrieval.rrf import reciprocal_rank_fusion
 
-def load_eval_set(path: str) -> List[Dict[str, str]]:
-    with open(path, 'r') as f:
-        return json.load(f)
 
-def calculate_mrr(rankings: List[int]) -> float:
-    if not rankings:
-        return 0.0
-    return np.mean([1.0 / rank if rank > 0 else 0.0 for rank in rankings])
+def load_eval_set(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
-def calculate_recall_at_k(rankings: List[int], k: int) -> float:
-    if not rankings:
-        return 0.0
-    hits = sum(1 for rank in rankings if 0 < rank <= k)
-    return hits / len(rankings)
 
-def calculate_ndcg_at_k(rankings: List[int], k: int) -> float:
-    if not rankings:
-        return 0.0
-    ndcg_scores = []
-    for rank in rankings:
-        if 0 < rank <= k:
-            # relevance is 1 since we only have binary ground truth
-            dcg = 1.0 / math.log2(rank + 1)
-            idcg = 1.0 / math.log2(1 + 1)
-            ndcg_scores.append(dcg / idcg)
-        else:
-            ndcg_scores.append(0.0)
-    return np.mean(ndcg_scores)
+@contextmanager
+def temporary_index():
+    directory = tempfile.TemporaryDirectory(prefix="rag-evaluation-")
+    try:
+        yield directory.name
+    finally:
+        # Chroma may release its final Windows file handles asynchronously.
+        # Retry only permission failures, within the directory tempfile created.
+        target = Path(directory.name).resolve()
+        if not target.is_relative_to(Path(tempfile.gettempdir()).resolve()) or not target.name.startswith("rag-evaluation-"):
+            raise RuntimeError("Unexpected temporary index directory.")
+        for attempt in range(6):
+            try:
+                directory.cleanup()
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                gc.collect()
+                time.sleep(min(0.1 * 2 ** attempt, 1))
 
-def get_rank_of_expected_source(results: List[Dict[str, Any]], expected_source: str) -> int:
-    for i, res in enumerate(results):
-        src_name = res.get("metadata", {}).get("source", "")
-        if expected_source.lower() in src_name.lower():
-            return i + 1  # 1-indexed rank
+
+def calculate_mrr(rankings):
+    return sum(1 / rank if rank > 0 else 0 for rank in rankings) / len(rankings) if rankings else 0.0
+
+
+def calculate_recall_at_k(rankings, k):
+    # Each question has one relevant document: recall equals document hit rate.
+    return sum(0 < rank <= k for rank in rankings) / len(rankings) if rankings else 0.0
+
+
+def calculate_ndcg_at_k(rankings, k):
+    return sum(1 / math.log2(rank + 1) if 0 < rank <= k else 0 for rank in rankings) / len(rankings) if rankings else 0.0
+
+
+def get_rank_of_expected_source(results, expected_source):
+    for rank, result in enumerate(results, 1):
+        if result.get("metadata", {}).get("source", "").casefold() == expected_source.casefold():
+            return rank
     return 0
 
-def run_evaluation(eval_set: List[Dict[str, str]], pipeline: RAGPipeline, mode: str, k: int = 5):
-    """
-    Modes:
-    1. 'dense'
-    2. 'bm25'
-    3. 'hybrid' (naive dense + bm25 combined scores - just concatenating for now, or averaging)
-    4. 'hybrid_rrf'
-    5. 'hybrid_rrf_rerank'
-    """
-    rankings = []
-    
+
+def retrieve(pipeline, query, mode, k):
+    if mode == "dense":
+        return pipeline.dense_retriever.retrieve(query, top_k=k)
+    if mode == "bm25":
+        return pipeline.sparse_retriever.retrieve(query, top_k=k)
+    if mode in {"hybrid_rrf", "hybrid_rrf_rerank"}:
+        return pipeline.hybrid_retriever.retrieve(query, top_k=k, use_reranking=mode.endswith("_rerank"))
+    if mode != "hybrid":
+        raise ValueError(f"Unknown retrieval mode: {mode}")
+    dense = pipeline.dense_retriever.retrieve(query, top_k=k)
+    sparse = pipeline.sparse_retriever.retrieve(query, top_k=k)
+    results, seen = [], set()
+    for pair in zip_longest(dense, sparse):
+        for item in pair:
+            if item is not None and item["id"] not in seen:
+                seen.add(item["id"])
+                results.append(item)
+    return results[:k]
+
+
+def run_evaluation(eval_set, pipeline, mode, k=5):
+    if k <= 0 or not eval_set:
+        raise ValueError("Evaluation requires questions and a positive k.")
+    rankings, durations = [], []
     for item in eval_set:
-        query = item['question']
-        expected_source = item['expected_source']
-        
-        # 1. Embed query
-        query_embedding = pipeline.embedding_model.encode([query])[0]
-        
-        # Retrieval based on mode
-        results = []
-        if mode == 'dense':
-            results = pipeline.dense_retriever.retrieve(query, top_k=k)
-        elif mode == 'bm25':
-            results = pipeline.sparse_retriever.retrieve(query, top_k=k)
-        elif mode == 'hybrid':
-            dense = pipeline.dense_retriever.retrieve(query, top_k=k)
-            sparse = pipeline.sparse_retriever.retrieve(query, top_k=k)
-            # Naive interleaving without RRF
-            seen = set()
-            for d, s in zip(dense, sparse):
-                if d['id'] not in seen:
-                    results.append(d)
-                    seen.add(d['id'])
-                if s['id'] not in seen:
-                    results.append(s)
-                    seen.add(s['id'])
-            # Fill the rest if zip is exhausted
-            for d in dense:
-                if d['id'] not in seen:
-                    results.append(d)
-                    seen.add(d['id'])
-            results = results[:k]
-        elif mode == 'hybrid_rrf':
-            dense = pipeline.dense_retriever.retrieve(query, top_k=k)
-            sparse = pipeline.sparse_retriever.retrieve(query, top_k=k)
-            results = reciprocal_rank_fusion(dense, sparse)
-            results = results[:k]
-        elif mode == 'hybrid_rrf_rerank':
-            dense = pipeline.dense_retriever.retrieve(query, top_k=10)
-            sparse = pipeline.sparse_retriever.retrieve(query, top_k=10)
-            fused = reciprocal_rank_fusion(dense, sparse)
-            if pipeline.hybrid_retriever.reranker:
-                results = pipeline.hybrid_retriever.reranker.rerank(query, fused, top_k=k)
-            else:
-                results = fused[:k]
-            
-        rank = get_rank_of_expected_source(results, expected_source)
-        rankings.append(rank)
-        
+        started = perf_counter()
+        results = retrieve(pipeline, item["question"], mode, k)
+        durations.append(perf_counter() - started)
+        rankings.append(get_rank_of_expected_source(results, item["expected_source"]))
     return {
-        "Recall@5": calculate_recall_at_k(rankings, 5),
-        "MRR": calculate_mrr(rankings),
-        "NDCG@5": calculate_ndcg_at_k(rankings, 5)
+        f"Recall@{k}": calculate_recall_at_k(rankings, k),
+        f"MRR@{k}": calculate_mrr(rankings), f"NDCG@{k}": calculate_ndcg_at_k(rankings, k),
+        "mean_latency_seconds": sum(durations) / len(durations),
     }
 
-if __name__ == "__main__":
-    print("Initializing pipeline...")
-    pipeline = RAGPipeline(llm_model="llama3.2")
-    
-    # We must build the index for the dev dataset
-    print("Building index with evaluation documents...")
-    success = pipeline.build_index()
-    if not success:
-        print("Failed to build index. Ensure data/ folder has files.")
-        sys.exit(1)
-        
-    eval_path = os.path.join(os.path.dirname(__file__), "eval_set.json")
-    if not os.path.exists(eval_path):
-        print(f"Eval set not found at {eval_path}")
-        sys.exit(1)
-        
-    eval_set = load_eval_set(eval_path)
-    print(f"\nRunning evaluation on {len(eval_set)} questions...")
-    
-    modes = ['dense', 'bm25', 'hybrid', 'hybrid_rrf']
+
+def main():
+    root = Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, default=root / "fixtures")
+    parser.add_argument("--eval-set", type=Path, default=root / "demo_set.json")
+    parser.add_argument("--output", type=Path, default=root.parent / "docs" / "EVALUATION.md")
+    parser.add_argument("--reranker", action="store_true")
+    parser.add_argument("--k", type=int, default=1)
+    args = parser.parse_args()
+    questions = load_eval_set(args.eval_set)
+    modes = ["dense", "bm25", "hybrid", "hybrid_rrf"]
+    if args.reranker:
+        modes.append("hybrid_rrf_rerank")
     results = {}
-    
-    for mode in modes:
-        print(f"Evaluating {mode}...")
-        res = run_evaluation(eval_set, pipeline, mode, k=5)
-        results[mode] = res
-        
-    # Generate Markdown Report
-    report_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "docs", "EVALUATION.md")
-    os.makedirs(os.path.dirname(report_path), exist_ok=True)
-    
-    with open(report_path, "w") as f:
-        f.write("# RAG Evaluation Report\n\n")
-        f.write("This report was generated on a synthetic development benchmark of ML and system concepts to evaluate retrieval configurations.\n\n")
-        f.write("## Retrieval Metrics\n\n")
-        f.write("| Method | Recall@5 | MRR | NDCG@5 |\n")
-        f.write("|--------|----------|-----|--------|\n")
-        
-        method_names = {
-            'dense': 'Dense Only',
-            'bm25': 'BM25 Only',
-            'hybrid': 'Hybrid (Naive)',
-            'hybrid_rrf': 'Hybrid + RRF'
-        }
-        
+    # Benchmarking must never overwrite or mix with the user's document index.
+    with temporary_index() as temporary, RAGPipeline(data_dir=str(args.data_dir), db_path=temporary) as pipeline:
+        pipeline.build_index()
+        sources = {item["name"].casefold() for item in pipeline.list_files()}
+        if not questions or any(item["expected_source"].casefold() not in sources for item in questions):
+            raise ValueError("Every expected source must exist in the evaluation corpus.")
         for mode in modes:
-            r = results[mode]
-            f.write(f"| {method_names[mode]} | {r['Recall@5']:.1%} | {r['MRR']:.3f} | {r['NDCG@5']:.3f} |\n")
-            
-        f.write(f"| Hybrid + RRF + Reranker | N/A (Timeout) | N/A | N/A |\n")
-            
-        f.write("\n## Answer Quality\n")
-        f.write("Answer quality metrics (faithfulness, context relevance, answer relevance) and citation correctness are difficult to evaluate without an LLM-as-a-judge workflow, which is not yet implemented. Future phases will introduce automated quality scoring for generated answers.\n")
-        
-    print(f"\nEvaluation complete. Report saved to {report_path}")
+            print(f"Evaluating {mode}...", flush=True)
+            results[mode] = run_evaluation(questions, pipeline, mode, args.k)
+    k = args.k
+    lines = [
+        "# RAG evaluation report", "",
+        f"Measured over {len(questions)} questions from `{args.eval_set.name}` with an isolated index.", "",
+        "Embedding model: `all-MiniLM-L6-v2` (CPU). Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` (CPU).", "",
+        f"| Method | Recall@{k} | MRR@{k} | nDCG@{k} | Mean retrieval seconds |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for mode, result in results.items():
+        lines.append(f"| {mode} | {result[f'Recall@{k}']:.3f} | {result[f'MRR@{k}']:.3f} | {result[f'NDCG@{k}']:.3f} | {result['mean_latency_seconds']:.3f} |")
+    if not args.reranker:
+        lines.extend(["", "Reranking was not evaluated. Enable it with `--reranker`; no timeout is inferred."])
+    lines.extend(["", "One expected document is labelled per question; recall is therefore document hit rate. "
+                  "MRR is truncated at k. This small synthetic corpus is a smoke benchmark, not a held-out quality claim. "
+                  "Generation faithfulness, citation support, unanswerable questions, and production latency are not evaluated here.", ""])
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Report saved to {args.output}")
+
+
+if __name__ == "__main__":
+    main()

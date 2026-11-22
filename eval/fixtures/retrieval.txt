@@ -1,0 +1,5 @@
+Retrieval-Augmented Generation (RAG) supplies retrieved evidence to a language model before it answers a question. It can use a changing document collection without retraining the language model.
+
+Dense retrieval encodes questions and passages as vectors. Sparse retrieval matches words. BM25 is a sparse ranking function that considers term frequency, inverse document frequency, and document length.
+
+Reciprocal Rank Fusion (RRF) combines ordered result lists using ranks rather than directly comparing their incompatible raw scores. A cross-encoder jointly scores a question and a candidate passage after initial retrieval.

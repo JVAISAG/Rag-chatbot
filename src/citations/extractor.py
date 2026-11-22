@@ -11,7 +11,7 @@ class CitationExtractor:
         """
         citations = re.findall(r'\[\d+\]', text)
         # Deduplicate and sort
-        unique_citations = sorted(list(set(citations)))
+        unique_citations = sorted(set(citations), key=lambda value: int(value[1:-1]))
         return unique_citations
 
     @staticmethod
@@ -29,7 +29,8 @@ class CitationExtractor:
                     references.append({
                         "citation": citation,
                         "source": chunk['metadata'].get('source', 'Unknown'),
-                        "text_snippet": chunk['text'][:150] + "..."
+                        "metadata": {key: value for key, value in chunk["metadata"].items() if key != "filepath"},
+                        "text_snippet": chunk['text'][:300] + ("..." if len(chunk['text']) > 300 else "")
                     })
             except ValueError:
                 continue

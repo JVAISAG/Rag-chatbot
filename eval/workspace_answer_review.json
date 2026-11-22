@@ -1,0 +1,512 @@
+{
+  "review_date": "2026-11-22",
+  "review_method": "Codex engineering review against expected answers and cited fictional source passages; not independent human grading or a real-paper accuracy benchmark.",
+  "corpora": [
+    {
+      "split": "development",
+      "answer_report": "eval/workspace_answers_final.json",
+      "canonical_answer_report_sha256": "66a1bb8dd73878508a4233de1aee0d9820d7f1d0b1c773f3a1d33e06486f94eb",
+      "dataset_sha256": "039b5b4e14a69fbf955eb8c13922a0ea16c8bfe87fc0e97edcf4280f9ee2ea9f",
+      "question_count": 37,
+      "supported": 33,
+      "correct_abstentions": 3,
+      "false_refusals": 1,
+      "cases": [
+        {
+          "question_id": "q01",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-a"
+          ]
+        },
+        {
+          "question_id": "q02",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-a"
+          ]
+        },
+        {
+          "question_id": "q03",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-a"
+          ]
+        },
+        {
+          "question_id": "q04",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-a"
+          ]
+        },
+        {
+          "question_id": "q05",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-a"
+          ]
+        },
+        {
+          "question_id": "q06",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-b"
+          ]
+        },
+        {
+          "question_id": "q07",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-b"
+          ]
+        },
+        {
+          "question_id": "q08",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-b"
+          ]
+        },
+        {
+          "question_id": "q09",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-b"
+          ]
+        },
+        {
+          "question_id": "q10",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-b"
+          ]
+        },
+        {
+          "question_id": "q11",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-c"
+          ]
+        },
+        {
+          "question_id": "q12",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-c"
+          ]
+        },
+        {
+          "question_id": "q13",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-c"
+          ]
+        },
+        {
+          "question_id": "q14",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-c"
+          ]
+        },
+        {
+          "question_id": "q15",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-c"
+          ]
+        },
+        {
+          "question_id": "q16",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-d"
+          ]
+        },
+        {
+          "question_id": "q17",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-d"
+          ]
+        },
+        {
+          "question_id": "q18",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-d"
+          ]
+        },
+        {
+          "question_id": "q19",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-d"
+          ]
+        },
+        {
+          "question_id": "q20",
+          "verdict": "supported_quote",
+          "cited_sources": [
+            "paper-d"
+          ],
+          "note": "Quoted negative finding addresses the question; the full passage supplies the dataset context."
+        },
+        {
+          "question_id": "q21",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-a"
+          ]
+        },
+        {
+          "question_id": "q22",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-a"
+          ]
+        },
+        {
+          "question_id": "q23",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-a"
+          ]
+        },
+        {
+          "question_id": "q24",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-a"
+          ]
+        },
+        {
+          "question_id": "q25",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-a"
+          ]
+        },
+        {
+          "question_id": "q26",
+          "verdict": "false_refusal",
+          "cited_sources": [],
+          "note": "Conservative false refusal despite an explicit cold-loading/warm-generation distinction. Not counted as supported."
+        },
+        {
+          "question_id": "q27",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-b"
+          ]
+        },
+        {
+          "question_id": "q28",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-b"
+          ]
+        },
+        {
+          "question_id": "q29",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-b"
+          ]
+        },
+        {
+          "question_id": "q30",
+          "verdict": "supported_quote",
+          "cited_sources": [
+            "article-b"
+          ],
+          "note": "Exact excerpt preserves the owner and sorted revision identifiers."
+        },
+        {
+          "question_id": "q31",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-a",
+            "paper-c"
+          ],
+          "note": "Both dataset identifiers are correct and match their cited sources."
+        },
+        {
+          "question_id": "q32",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-b",
+            "paper-c"
+          ]
+        },
+        {
+          "question_id": "q33",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "paper-a",
+            "paper-d"
+          ]
+        },
+        {
+          "question_id": "q34",
+          "verdict": "correct_abstention",
+          "cited_sources": []
+        },
+        {
+          "question_id": "q35",
+          "verdict": "correct_abstention",
+          "cited_sources": []
+        },
+        {
+          "question_id": "q36",
+          "verdict": "correct_abstention",
+          "cited_sources": []
+        },
+        {
+          "question_id": "q37",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "article-b"
+          ]
+        }
+      ]
+    },
+    {
+      "split": "validation",
+      "answer_report": "eval/workspace_validation_answers.json",
+      "canonical_answer_report_sha256": "8f9fa2e98ffdb7bf43c91225dde483b958b1ce3368232273b4a79ddef305f8c9",
+      "dataset_sha256": "6f631f30fb69218b9a980fd968429d0b16e2f48c9d442479c045e3901e7da3bc",
+      "question_count": 32,
+      "supported": 29,
+      "correct_abstentions": 3,
+      "false_refusals": 0,
+      "cases": [
+        {
+          "question_id": "v01",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "juniper"
+          ]
+        },
+        {
+          "question_id": "v02",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "juniper"
+          ]
+        },
+        {
+          "question_id": "v03",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "juniper"
+          ]
+        },
+        {
+          "question_id": "v04",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "juniper"
+          ]
+        },
+        {
+          "question_id": "v05",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "juniper"
+          ]
+        },
+        {
+          "question_id": "v06",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "larch"
+          ]
+        },
+        {
+          "question_id": "v07",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "larch"
+          ]
+        },
+        {
+          "question_id": "v08",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "larch"
+          ]
+        },
+        {
+          "question_id": "v09",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "larch"
+          ]
+        },
+        {
+          "question_id": "v10",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "larch"
+          ]
+        },
+        {
+          "question_id": "v11",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "orchid"
+          ]
+        },
+        {
+          "question_id": "v12",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "orchid"
+          ]
+        },
+        {
+          "question_id": "v13",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "orchid"
+          ]
+        },
+        {
+          "question_id": "v14",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "orchid"
+          ]
+        },
+        {
+          "question_id": "v15",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "orchid"
+          ],
+          "note": "Correct but terse numeric response."
+        },
+        {
+          "question_id": "v16",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "aspen"
+          ]
+        },
+        {
+          "question_id": "v17",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "aspen"
+          ]
+        },
+        {
+          "question_id": "v18",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "aspen"
+          ]
+        },
+        {
+          "question_id": "v19",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "aspen"
+          ],
+          "note": "Includes an extra, source-supported RRF constant alongside the requested metric and value."
+        },
+        {
+          "question_id": "v20",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "aspen"
+          ]
+        },
+        {
+          "question_id": "v21",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "revision-guide"
+          ]
+        },
+        {
+          "question_id": "v22",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "revision-guide"
+          ]
+        },
+        {
+          "question_id": "v23",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "revision-guide"
+          ]
+        },
+        {
+          "question_id": "v24",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "inference-guide"
+          ],
+          "note": "Includes an extra, source-supported list of profiling stages."
+        },
+        {
+          "question_id": "v25",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "inference-guide"
+          ]
+        },
+        {
+          "question_id": "v26",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "juniper",
+            "orchid"
+          ]
+        },
+        {
+          "question_id": "v27",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "larch",
+            "orchid"
+          ]
+        },
+        {
+          "question_id": "v28",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "aspen",
+            "juniper"
+          ]
+        },
+        {
+          "question_id": "v29",
+          "verdict": "correct_abstention",
+          "cited_sources": []
+        },
+        {
+          "question_id": "v30",
+          "verdict": "correct_abstention",
+          "cited_sources": []
+        },
+        {
+          "question_id": "v31",
+          "verdict": "correct_abstention",
+          "cited_sources": []
+        },
+        {
+          "question_id": "v32",
+          "verdict": "supported_answer",
+          "cited_sources": [
+            "inference-guide"
+          ]
+        }
+      ]
+    }
+  ]
+}

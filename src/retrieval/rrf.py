@@ -5,18 +5,28 @@ def reciprocal_rank_fusion(dense_results: List[Dict[str, Any]], sparse_results: 
     Fuse dense and sparse retrieval results using Reciprocal Rank Fusion.
     score = sum(1 / (k + rank))
     """
+    if k <= 0:
+        raise ValueError("RRF k must be positive.")
     fused_scores = {}
     chunk_map = {}
     
     # Process dense
+    seen = set()
     for rank, item in enumerate(dense_results, start=1):
         doc_id = item["id"]
+        if doc_id in seen:
+            continue
+        seen.add(doc_id)
         chunk_map[doc_id] = item
         fused_scores[doc_id] = fused_scores.get(doc_id, 0.0) + (1.0 / (k + rank))
         
     # Process sparse
+    seen = set()
     for rank, item in enumerate(sparse_results, start=1):
         doc_id = item["id"]
+        if doc_id in seen:
+            continue
+        seen.add(doc_id)
         if doc_id not in chunk_map:
             chunk_map[doc_id] = item
         fused_scores[doc_id] = fused_scores.get(doc_id, 0.0) + (1.0 / (k + rank))

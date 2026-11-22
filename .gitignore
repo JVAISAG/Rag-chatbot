@@ -44,8 +44,8 @@ chroma_db/
 *.index
 
 # Local embeddings / model cache
-models/
-embeddings/
+/models/
+/embeddings/
 .cache/
 
 # =========================
@@ -102,6 +102,11 @@ logs/
 
 build/
 dist/
+node_modules/
+.next/
+*.tsbuildinfo
+test-results/
+playwright-report/
 *.egg-info/
 .eggs/
 
